@@ -19,7 +19,7 @@ sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFuncti
 # 4. Create (or Reset) the Collection
 collection = chroma_client.get_or_create_collection(
     name="bhuvi_knowledge",
-    embedding_function=sentence_transformer_ef
+    embedding_function=sentence_transformer_ef #type: ignore
 )
 
 # 5. Read the Text File

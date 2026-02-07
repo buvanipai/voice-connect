@@ -5,3 +5,5 @@ anthropic
 deepgram-sdk
 twilio
 websockets
+chromadb
+sentence-transformers
