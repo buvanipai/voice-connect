@@ -1,5 +1,4 @@
 # app/services/llm_service.py
-from curses import raw
 import json
 import os
 from pydoc import doc
@@ -11,7 +10,7 @@ from chromadb.utils import embedding_functions
 
 class LLMService:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self.client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         self.model = settings.MODEL_NAME
         
         db_path = "./chroma_db"
@@ -70,7 +69,7 @@ class LLMService:
         """
         
         try:
-            message = self.client.messages.create(
+            message = await self.client.messages.create(
                 model=self.model,
                 max_tokens=200,
                 system=system_prompt,
