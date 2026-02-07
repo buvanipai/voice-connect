@@ -7,3 +7,4 @@ twilio
 websockets
 chromadb
 sentence-transformers
+pydantic-settings
