@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  # The Brain: Your Python FastAPI app
+  app:
+    image: python:3.11-slim
+    volumes:
+      - .:/app
+    working_dir: /app
+    env_file: .env
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "pip install -r requirements.txt && 
+             uvicorn main:app --host 0.0.0.0 --port 8000"
+
+  # The Pipe: The ngrok tunnel
+  tunnel:
+    image: ngrok/ngrok:latest
+    restart: always
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: http app:8000
+    ports:
+      - "4040:4040"
+    depends_on:
+      - app
