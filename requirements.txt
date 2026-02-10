@@ -8,3 +8,5 @@ websockets
 chromadb
 sentence-transformers
 pydantic-settings
+twilio
+python-multipart
