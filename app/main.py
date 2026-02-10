@@ -1,7 +1,9 @@
 # app/main.py
+from pydoc import text
 from fastapi import FastAPI, HTTPException, Request, Response
 from app.schemas import CallPayload, AIResponse
 from app.services.llm_service import LLMService
+from app.services.stt_services import DeepgramSTT
 
 app = FastAPI(title="VoiceConnect API", version="0.1.0")
 
@@ -23,16 +25,45 @@ async def process_speech(payload: CallPayload):
 @app.post("/voice")
 async def voice_webhook(request: Request):
     """
+    Step 1: Answer and ask the user to speak
     Twilio hits this endpoint when the phone rings.
     We return XML instructions telling it to speak.
     """
     # Simple XML response (TwiML)
     xml_response = """<?xml version="1.0" encoding="UTF-8"?>
         <Response>
-            <Say voice="alice">Hello! This is Voice Connect running on Google Cloud. The system is fully operational.</Say>
-            <Pause length="1"/>
-            <Say>Please check your deployment logs for the next steps. Goodbye.</Say>
+            <Say voice="alice">Hello! How can I help you?</Say>
+            <Record maxLength="5" action="/transcribe" playBeep="true"/>
         </Response>
         """
     # Return as XML so Twilio understands it
+    return Response(content=xml_response, media_type="application/xml")
+
+@app.post("/transcribe")
+async def transcribe_webhook(request: Request):
+    """
+    Step 2: Recieve recording -> Transcribe -> Echo back
+    Twilio hits this endpoint after the call ends, sending the recording URL.
+    We will process the recording and return a response.
+    """
+    form_data = await request.form()
+    recording_url = str(form_data.get("RecordingUrl"))
+    
+    if not recording_url:
+        return Response(content="<Response><Say>I didn't hear anything.</Say></Response>", media_type="application/xml")
+    
+    # Deepgram to convert audio to text
+    stt = DeepgramSTT()
+    text = await stt.transcribe(recording_url)
+    
+    print(f"User said: {text}")
+    
+    # Echo back to user
+    xml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+            <Say voice="alice">You said: {text}</Say>
+        </Response>
+        """
+    
+    # For now, just return the URL (later we will call Deepgram)
     return Response(content=xml_response, media_type="application/xml")
