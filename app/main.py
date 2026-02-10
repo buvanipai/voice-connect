@@ -3,7 +3,7 @@ from pydoc import text
 from fastapi import FastAPI, HTTPException, Request, Response
 from app.schemas import CallPayload, AIResponse
 from app.services.llm_service import LLMService
-from app.services.stt_services import DeepgramSTT
+from app.services.stt_service import DeepgramSTT
 
 app = FastAPI(title="VoiceConnect API", version="0.1.0")
 

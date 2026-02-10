@@ -1,6 +1,11 @@
 # app/services/stt_service.py
 import os
-from deepgram import DeepgramClient, PrerecordedOptions
+import logging
+from venv import logger
+from deepgram import DeepgramClient
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class DeepgramSTT:
     def __init__(self):
@@ -19,11 +24,11 @@ class DeepgramSTT:
             source = {"url": audio_url}
 
             # 2. Configure options (Fastest model, English)
-            options = PrerecordedOptions(
-                model="nova-2",
-                smart_format=True,
-                language="en"
-            )
+            options = {
+                "model": "nova-2",
+                "smart_format": True,
+                "language": "en"
+            }
 
             # 3. Call Deepgram
             response = self.client.listen.prerecorded.v("1").transcribe_url(source, options) # type: ignore
