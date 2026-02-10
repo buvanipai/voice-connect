@@ -1,0 +1,10 @@
+.git
+.gitignore
+venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+chroma_db/
+app/data/chroma_db/
+readme.md
