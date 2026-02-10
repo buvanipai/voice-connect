@@ -1,4 +1,6 @@
 # app/main.py
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env file
 from pydoc import text
 from fastapi import FastAPI, HTTPException, Request, Response
 from app.schemas import CallPayload, AIResponse
@@ -8,7 +10,15 @@ from app.services.stt_service import DeepgramSTT
 app = FastAPI(title="VoiceConnect API", version="0.1.0")
 
 # Initialize Service
-llm_service = LLMService()
+try:
+    llm_service = LLMService()
+except Exception as e:
+    print(f"Error initializing LLMService: {e}")
+
+@app.get("/")
+def home():
+    return {"message": "Welcome to the VoiceConnect API!",
+            "status": "online"}
 
 @app.post("/process-speech", response_model=AIResponse)
 async def process_speech(payload: CallPayload):
@@ -30,7 +40,7 @@ async def voice_webhook(request: Request):
     We return XML instructions telling it to speak.
     """
     # Simple XML response (TwiML)
-    xml_response = """<?xml version="1.0" encoding="UTF-8"?>
+    xml_response = """
         <Response>
             <Say voice="alice">Hello! How can I help you?</Say>
             <Record maxLength="5" action="/transcribe" playBeep="true"/>
@@ -59,7 +69,7 @@ async def transcribe_webhook(request: Request):
     print(f"User said: {text}")
     
     # Echo back to user
-    xml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
+    xml_response = f"""
         <Response>
             <Say voice="alice">You said: {text}</Say>
         </Response>
