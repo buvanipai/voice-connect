@@ -1,6 +1,9 @@
 # app/main.py
 from dotenv import load_dotenv
-load_dotenv()  # Load environment variables from .env file
+load_dotenv()
+import logging
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 from pydoc import text
 from fastapi import FastAPI, HTTPException, Request, Response
 from app.schemas import CallPayload, AIResponse
