@@ -45,7 +45,7 @@ async def voice_webhook(request: Request):
     # Simple XML response (TwiML)
     xml_response = """
         <Response>
-            <Say voice="alice">Hello! How can I help you?</Say>
+            <Say voice="alice">Hello! I'm the Bhuvi IT Assistant. How can I help you?</Say>
             <Record maxLength="5" action="/transcribe" playBeep="true"/>
         </Response>
         """
@@ -68,13 +68,18 @@ async def transcribe_webhook(request: Request):
     # Deepgram to convert audio to text
     stt = DeepgramSTT()
     text = await stt.transcribe(recording_url)
-    
     print(f"User said: {text}")
+    
+    ai_response_obj = await llm_service.analyze_call(text)
+    ai_text = ai_response_obj.reply_text
+    print(f"AI response: {ai_text}")
     
     # Echo back to user
     xml_response = f"""
         <Response>
-            <Say voice="alice">You said: {text}</Say>
+            <Say voice="alice">{ai_text}</Say>
+            <Pause length="1"/>
+            <Record maxLength="10" action="/transcribe" playBeep="true"/>
         </Response>
         """
     
