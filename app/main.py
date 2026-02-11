@@ -1,4 +1,5 @@
 # app/main.py
+import select
 from dotenv import load_dotenv
 load_dotenv()
 import logging
@@ -46,7 +47,7 @@ async def voice_webhook(request: Request):
     xml_response = """
         <Response>
             <Say voice="alice">Hello! I'm the Bhuvi IT Assistant. How can I help you?</Say>
-            <Record maxLength="5" action="/transcribe" playBeep="true"/>
+            <Record maxLength="10" timeout="2" trim="trim-silence" action="/transcribe" playBeep="true"/>
         </Response>
         """
     # Return as XML so Twilio understands it
@@ -74,12 +75,29 @@ async def transcribe_webhook(request: Request):
     ai_text = ai_response_obj.reply_text
     print(f"AI response: {ai_text}")
     
+    VOICE_MAP = {
+        "[EN]": {"voice": "alice", "language": "en-US"},
+        "[ES]": {"voice": "Polly.Mia", "language": "es-MX"},
+        "[HI]": {"voice": "Polly.Aditi", "language": "hi-IN"},
+    }
+    
+    selected_voice = "alice"
+    selected_language = "en-US"
+    clean_text = ai_text
+    
+    for tag, settings in VOICE_MAP.items():
+        if tag in ai_text:
+            selected_voice = settings["voice"]
+            selected_language = settings["language"]
+            clean_text = ai_text.replace(tag, "").strip()
+            break
+    
     # Echo back to user
     xml_response = f"""
         <Response>
             <Say voice="alice">{ai_text}</Say>
             <Pause length="1"/>
-            <Record maxLength="10" action="/transcribe" playBeep="true"/>
+            <Record maxLength="30" timeout="2" trim="trim-silence" action="/transcribe" playBeep="true"/>
         </Response>
         """
     
