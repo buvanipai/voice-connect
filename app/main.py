@@ -69,6 +69,7 @@ async def transcribe_webhook(request: Request):
     # Deepgram to convert audio to text
     stt = DeepgramSTT()
     text = await stt.transcribe(recording_url)
+    
     print(f"User said: {text}")
     
     ai_response_obj = await llm_service.analyze_call(text)
