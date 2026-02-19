@@ -13,6 +13,8 @@ from app.services.stt_service import DeepgramSTT
 
 app = FastAPI(title="VoiceConnect API", version="0.1.0")
 
+llm_service = None
+
 # Initialize Service
 try:
     llm_service = LLMService()
@@ -34,7 +36,7 @@ async def process_speech(payload: CallPayload):
     if not payload.text.strip():
         raise HTTPException(status_code=400, detail="Input text cannot be empty")
         
-    result = await llm_service.analyze_call(payload.text)
+    result = await llm_service.analyze_call(payload.text) #type: ignore
     return result
 
 # Phone endpoint for Twilio
@@ -74,7 +76,14 @@ async def transcribe_webhook(request: Request):
     
     print(f"User said: {text}")
     
-    ai_response_obj = await llm_service.analyze_call(text)
+    if not text or not text.strip():
+        print("User was silent. Asking them to repeat.")
+        return Response(
+            content="<Response><Say>I didn't catch that. Could you please repeat?</Say><Record maxLength='10' action='/transcribe' playBeep='true'/></Response>", 
+            media_type="application/xml"
+        )
+    
+    ai_response_obj = await llm_service.analyze_call(text) #type: ignore
     ai_text = ai_response_obj.reply_text
     print(f"AI response: {ai_text}")
     
