@@ -17,7 +17,9 @@ app = FastAPI(title="VoiceConnect API", version="0.1.0")
 try:
     llm_service = LLMService()
 except Exception as e:
-    print(f"Error initializing LLMService: {e}")
+    print(f"Error initializing LLMService: {str(e)}")
+    import traceback
+    traceback.print_exc()
 
 @app.get("/")
 def home():
