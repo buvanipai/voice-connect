@@ -31,7 +31,7 @@ class DeepgramSTT:
         try:
             response = self.client.listen.v1.media.transcribe_url(
                 url=audio_url,
-                model="nova-2",
+                model="nova-2-phonecall",
                 smart_format=True,
                 detect_language=True,
             )

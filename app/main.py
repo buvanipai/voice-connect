@@ -72,8 +72,8 @@ async def voice_webhook(request: Request):
     # Simple XML response (TwiML)
     xml_response = """
         <Response>
-            <Say voice="alice">Hello! I'm the Bhuvi IT Assistant. How can I help you?</Say>
-            <Record maxLength="10" timeout="3" trim="trim-silence" action="/transcribe" playBeep="true"/>
+            <Say voice="Polly.Joanna-Neural">Hello! Thank you for calling Bhuvi IT Solutions. To route you to the right team, are you calling to apply for a job, looking to hire IT talent, or interested in our custom AI development services?</Say>
+            <Record maxLength="10" timeout="3" action="/transcribe" playBeep="true"/>
         </Response>
         """
     # Return as XML so Twilio understands it
@@ -126,12 +126,12 @@ async def transcribe_webhook(request: Request):
     print(f"[{call_sid}] Conversation history length: {len(call_memory)}")
     
     VOICE_MAP = {
-        "[EN]": {"voice": "alice", "language": "en-US"},
+        "[EN]": {"voice": "Polly.Joanna-Neural", "language": "en-US"},
         "[ES]": {"voice": "Polly.Mia", "language": "es-MX"},
         "[HI]": {"voice": "Polly.Aditi", "language": "hi-IN"},
     }
     
-    selected_voice = "alice"
+    selected_voice = "Polly.Joanna-Neural"
     selected_language = "en-US"
     clean_text = ai_text
     
@@ -143,25 +143,39 @@ async def transcribe_webhook(request: Request):
             break
     
     # Check if we should forward the call
-    if action == "forward":
+    if action == "forward" or ai_response_obj.intent == "ERROR":
         print(f"[{call_sid}] Ready to forward. Intent: {ai_response_obj.intent}")
         
         # Determine message based on intent
-        if ai_response_obj.intent == "JOB_SEEKER":
+        if ai_response_obj.intent == "ERROR":
+            forward_message = ai_response_obj.reply_text
+        elif ai_response_obj.intent == "JOB_SEEKER":
             forward_message = "Thank you for your interest! Let me forward you to a recruiter who can assist you further."
         elif ai_response_obj.intent == "CLIENT_LEAD":
             forward_message = "Thank you for reaching out! Let me forward you to our representative who can discuss your needs."
         else:
             forward_message = "Thank you for calling. Let me connect you to our team."
         
+        # Generate call whisper (summary) for the recruiter
+        service = get_llm_service()
+        call_whisper = await service.generate_call_summary(
+            intent=ai_response_obj.intent,
+            call_memory=call_memory
+        )
+        
+        print(f"[{call_sid}] Call Whisper: {call_whisper}")
+        
         # Clean up session when forwarding
         if call_sid in call_sessions:
             del call_sessions[call_sid]
         
-        # For testing: just end the call instead of actually forwarding
+        # For testing: Play end message + whisper, then hang up
+        # In production, you'd dial Subbu and play whisper to them
         xml_response = f"""
             <Response>
-                <Say voice="alice">{forward_message}</Say>
+                <Say voice="Polly.Joanna-Neural">{forward_message}</Say>
+                <Pause length="1"/>
+                <Say voice="Polly.Joanna-Neural">[RECRUITER BRIEF: {call_whisper}]</Say>
                 <Hangup/>
             </Response>
             """
@@ -170,9 +184,9 @@ async def transcribe_webhook(request: Request):
     # Continue conversation
     xml_response = f"""
         <Response>
-            <Say voice="alice">{clean_text}</Say>
+            <Say voice="Polly.Joanna-Neural">{clean_text}</Say>
             <Pause length="1"/>
-            <Record maxLength="30" timeout="3" trim="trim-silence" action="/transcribe" playBeep="true"/>
+            <Record maxLength="30" timeout="3" action="/transcribe" playBeep="true"/>
         </Response>
         """
     

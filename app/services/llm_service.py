@@ -45,8 +45,6 @@ class LLMService:
         else:
             retrieved_knowledge = "No relevant information found in the knowledge base."
             print("No relevant context found.")
-            
-        memory_string = json.dumps(call_memory, indent=2)
         
         system_prompt = f"""
         You are the Voice AI Receptionist for Bhuvi IT Solutions.
@@ -54,25 +52,27 @@ class LLMService:
         Knowledge Base:
         {retrieved_knowledge}
         
-        Past Conversation History:
-        {memory_string}
-        
         CANDIDATE FLOW (JOB_SEEKER intent):
-        If this is their FIRST message about jobs, ask ONE question at a time in this order:
-        1. Which specific role are they interested in? (Reference the CURRENT JOB OPENINGS from Knowledge Base if available)
-        2. What is their tech stack? (e.g., Python, React, AWS, Java, etc.)
-        3. How many years of experience do they have?
-        4. Are they willing to relocate or travel to the US for work?
-        5. What is their visa status? (US Citizen, Green Card, need TN Visa sponsorship, etc.)
+        Your goal is to collect these 5 specific details from the caller:
+        1. Specific role of interest
+        2. Tech stack / Skills
+        3. Years of experience
+        4. Willingness to relocate or travel to the US
+        5. Current visa status (e.g., F1 OPT, TN, H1B, Citizen)
         
-        Once you have collected ALL 5 pieces of information OR the user asks for a human, set "action" to "forward".
-        
+        CRITICAL STATE-TRACKING RULES:
+        - Read the "Past Conversation History" carefully. 
+        - Silently cross off the details the user has ALREADY provided.
+        - ONLY ask questions about the details that are STILL MISSING.
+        - DO NOT EVER repeat a question if the user already answered it in a previous turn.
+        - Once you have collected ALL 5 pieces of information, OR the user asks for a human, set "action" to "forward".
+
         CLIENT FLOW (CLIENT_LEAD intent):
-        1. What roles are they looking to hire for?
-        2. What specific skills or tech stack are they looking for?
-        3. Do they prefer nearshore talent or US-based?
-        
-        Once you understand their needs OR they ask for a human, set "action" to "forward".
+        Your goal is to collect:
+        1. Roles they are hiring for
+        2. Specific tech stack/skills needed
+        3. Preference for nearshore vs. US-based talent
+        - Apply the exact same CRITICAL STATE-TRACKING RULES above. Do not repeat questions. Set "action" to "forward" when complete.
         
         INTENT CLASSIFICATION:
         - JOB_SEEKER: Asking about jobs, careers, applying for a position, or job openings.
@@ -82,19 +82,30 @@ class LLMService:
         LANGUAGE TAGS:
         - Use [EN] for English, [ES] for Spanish, [HI] for Hindi at the start of reply_text.
         
-        CRITICAL: You MUST respond with ONLY a valid JSON object in this exact format, with no other text:
-
-        {{"intent": "JOB_SEEKER", "confidence": 0.9, "reply_text": "[EN] Your response here", "action": "speak"}}
+        CRITICAL OUTPUT FORMAT:
+        You MUST respond with ONLY a valid JSON object. 
+        DO NOT use line breaks, bullet points, or numbered lists inside the reply_text value. Keep reply_text as a single, continuous paragraph string.
+        Output exactly this format:
+        {{"intent": "JOB_SEEKER", "confidence": 0.9, "reply_text": "[EN] Your single paragraph response here.", "action": "speak"}}
         
         Do not add any explanation, markdown, or other text. Only output the JSON object.
         """
-        
+        chat_messages = []
+        for exchange in call_memory:
+            if exchange.get("user"):
+                chat_messages.append({"role": "user", "content": exchange["user"]})
+            if exchange.get("ai"):
+                saved_intent = exchange.get("intent", "GENERAL_INQUIRY")
+                safe_ai_text = exchange["ai"].replace('"', "'")
+                fake_json = f'{{"intent": "{saved_intent}", "confidence": 0.9, "reply_text": "{safe_ai_text}", "action": "speak"}}'
+                chat_messages.append({"role": "assistant", "content": fake_json})
+        chat_messages.append({"role": "user", "content": text})
         try:
             message = await self.client.messages.create(
                 model=self.model,
                 max_tokens=300,  # Increased for longer job-related responses
                 system=system_prompt,
-                messages=[{"role": "user", "content": text}]
+                messages=chat_messages
             )
             
             # Parse response
@@ -115,6 +126,7 @@ class LLMService:
             
             print(f"Claude Response: {raw_content[:200]}...")  # Debug: show first 200 chars
             
+            raw_content = raw_content.replace("\n", " ").replace("\r", " ")
             data = json.loads(raw_content)
             return AIResponse(**data)
             
@@ -124,7 +136,8 @@ class LLMService:
             return AIResponse(
                 intent="ERROR",
                 confidence=0.0,
-                reply_text="I apologize, but I am having trouble connecting. Please hold.",
+                reply_text="I apologize, but I am having technical difficulties. Please hold I'm connecting you to a representative.",
+                action="forward",
                 entities=[]
             )
         except Exception as e:
@@ -133,6 +146,60 @@ class LLMService:
             return AIResponse(
                 intent="ERROR",
                 confidence=0.0,
-                reply_text="I apologize, but I am having trouble connecting. Please hold.",
+                reply_text="I apologize, but I am having technical difficulties. Please hold I'm connecting you to a representative.",
+                action="forward",
                 entities=[]
             )
+    
+    async def generate_call_summary(self, intent: str, call_memory: list) -> str:
+        """
+        Generate a concise call summary (whisper) for the recruiter/representative.
+        This will be played to Subbu before connecting the call.
+        """
+        if not call_memory:
+            return "No information collected from the call."
+        
+        # Build a conversation transcript for Claude
+        transcript = ""
+        for exchange in call_memory:
+            transcript += f"Caller: {exchange.get('user', 'N/A')}\n"
+            transcript += f"AI: {exchange.get('ai', 'N/A')}\n\n"
+        
+        summary_prompt = f"""
+        Based on this phone conversation, generate a BRIEF 2-3 sentence summary that a recruiter will hear as a "call whisper" before the call connects.
+        The summary should:
+        1. Be under 30 seconds when spoken (roughly 75 words max)
+        2. Include caller's intent/needs
+        3. Include key details (role, experience, tech stack, visa status, etc.) if a JOB_SEEKER
+        4. Include hiring needs and preferences if CLIENT_LEAD
+        5. Be professional and concise
+        6. Sound natural when read aloud
+        
+        Intent: {intent}
+        
+        Conversation:
+        {transcript}
+        
+        Generate ONLY the summary text, nothing else:
+        """
+        
+        try:
+            message = await self.client.messages.create(
+                model=self.model,
+                max_tokens=150,
+                messages=[{"role": "user", "content": summary_prompt}]
+            )
+            
+            response_block = message.content[0]
+            
+            if response_block.type == "text":
+                summary = response_block.text.strip()
+            else:
+                summary = "Call summary generation failed. Please manually brief the staff."
+            
+            print(f"Generated Call Whisper: {summary}")
+            return summary
+            
+        except Exception as e:
+            print(f"Error generating summary: {e}")
+            return "Call summary generation failed. Please manually brief the staff."

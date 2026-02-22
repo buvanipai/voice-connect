@@ -143,18 +143,35 @@ This runs daily at 9 AM to keep job listings fresh.
 4. AI asks: Years of experience?
 5. AI asks: Willing to relocate/travel to US?
 6. AI asks: Visa status?
-7. AI: "Thank you! Let me forward you to a recruiter." → Call ends
+7. AI generates **Call Whisper** summary of conversation
+8. AI: "Thank you! Let me forward you to a recruiter."
+9. **System plays whisper to recruiter** (e.g., "Job seeker. Interested in Software Engineer role. 5 years Python/React/AWS. Has green card.")
+10. Call forwards to Subbu
 
 ### For Client Leads:
 1. User: "We need to hire developers"
 2. AI asks: What roles are you looking for?
 3. AI asks: What tech stack/skills?
 4. AI asks: Prefer nearshore or US-based?
-5. AI: "Thank you! Let me forward you to our representative." → Call ends
+5. AI generates **Call Whisper** summary
+6. AI: "Thank you! Let me forward you to our representative."
+7. **System plays whisper to representative** (e.g., "Client lead. Hiring for AI engineers. Need Python, ML expertise. Interested in nearshore.")
+8. Call forwards to Subbu
 
 ### For General Inquiries:
 - AI provides information from knowledge base
 - Mentions TN Visas, Nearshore delivery, NearMind, etc.
+
+## 🎤 Call Whisper (AI-Generated Brief)
+
+When a call is ready to forward, the system:
+1. **Generates a concise summary** using Claude from the conversation history
+2. **Plays it as a "whisper"** to the recruiter/representative before connecting
+3. **Caller hears nothing** - just music or silence while waiting
+
+**Example Whisper**: *"Job seeker ahead. Name provided: John. Senior Software Engineer role. 8 years experience in Python, AWS, Docker. Willing to relocate to Chicago. Currently on H-1B needing sponsorship. Green card application pending."*
+
+This ensures Subbu has **full context** without asking the caller to repeat information.
 
 ## 📁 Project Structure
 
@@ -169,7 +186,7 @@ ghost-phone/
 │   ├── data/
 │   │   └── knowledge_base.txt   # Company & job information
 │   └── services/
-│       ├── llm_service.py   # Claude AI integration
+│       ├── llm_service.py   # Claude AI integration + Call Whisper generation
 │       └── stt_service.py   # Deepgram speech-to-text
 ├── chroma_db/               # Vector database (generated, not in git)
 ├── ingest.py                # Knowledge base ingestion script
@@ -241,6 +258,33 @@ View logs in Google Cloud Console or locally:
 [CAxxxx] Conversation history length: 1
 ```
 
+## 🚀 Enabling Call Whisper in Production
+
+Currently, for testing, the call whisper is played to the caller before hanging up (marked as `[RECRUITER BRIEF]`).
+
+To enable **actual call forwarding with whisper to Subbu**:
+
+1. **Replace the Hangup logic in `app/main.py`** (~line 177):
+
+```python
+# Replace this:
+<Hangup/>
+
+# With this:
+<Dial callerId="+1-YOUR-TWILIO-NUMBER">
+    <Gather input="dtmf" numDigits="1" timeout="10">
+        <Say>{call_whisper}</Say>
+    </Gather>
+    +1-SUBBU-PHONE-NUMBER
+</Dial>
+```
+
+2. **Set Subbu's phone number** in your environment or config
+
+3. **Test the entire flow** with a test call
+
+The `call_whisper` variable contains the AI-generated summary that Subbu will hear before the caller is connected.
+
 ### Common Issues
 
 **Issue**: AI not mentioning jobs  
@@ -251,6 +295,9 @@ View logs in Google Cloud Console or locally:
 
 **Issue**: "ERROR" response from AI  
 **Solution**: Check API keys in `.env` and server logs
+
+**Issue**: Call Whisper is empty  
+**Solution**: Ensure conversation has at least one exchange before forwarding
 
 ## 🔐 Security
 
