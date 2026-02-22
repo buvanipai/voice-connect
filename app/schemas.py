@@ -13,3 +13,4 @@ class AIResponse(BaseModel):
     confidence: float = Field(..., description="0.0 to 1.0 score")
     entities: List[str] = Field(default_factory=list, description="Key extracted terms")
     reply_text: str = Field(..., description="What the AI voice should say back")
+    action: str = "speak"

@@ -15,8 +15,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 5. Copy your code into the container
 COPY . .
 
-# 6. Expose the port Google expects
+# 6. Generate vector database from knowledge base
+RUN python ingest.py
+
+# 7. Expose the port Google expects
 EXPOSE 8080
 
-# 7. Start the app
+# 8. Start the app
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

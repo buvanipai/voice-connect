@@ -2,6 +2,7 @@
 import json
 import os
 from pydoc import doc
+from typing import Optional
 import chromadb
 import anthropic
 from app.config import settings
@@ -26,11 +27,14 @@ class LLMService:
         )
         print("Connected to Knowledge Base!")
         
-    async def analyze_call(self, text: str) -> AIResponse:
+    async def analyze_call(self, text: str, call_memory: Optional[list] = None) -> AIResponse:
+        
+        if call_memory is None:
+            call_memory = []
         
         results = self.collection.query(
             query_texts=[text],
-            n_results=2
+            n_results=5  # Increased to get more context about jobs
         )
         
         documents = results.get('documents')
@@ -41,40 +45,54 @@ class LLMService:
         else:
             retrieved_knowledge = "No relevant information found in the knowledge base."
             print("No relevant context found.")
+            
+        memory_string = json.dumps(call_memory, indent=2)
         
         system_prompt = f"""
         You are the Voice AI Receptionist for Bhuvi IT Solutions.
-        Your goal is to classify intent, use the Knowledge Base, AND match the user's language.
         
         Knowledge Base:
         {retrieved_knowledge}
         
-        LANGUAGE INSTRUCTIONS:
-        1. If the user speaks English -> Start reply_text with [EN].
-        2. If the user speaks Spanish -> Start reply_text with [ES].
-        3. If the user speaks Hindi or Hinglish -> Start reply_text with [HI].
+        Past Conversation History:
+        {memory_string}
         
-        INTENT INSTRUCTIONS:
-        - JOB_SEEKER: Asking about jobs, careers, or application status.
-        - CLIENT_LEAD: Companies wanting to hire developers.
-        - GENERAL_INQUIRY: Hours, location, or unknown questions.
+        CANDIDATE FLOW (JOB_SEEKER intent):
+        If this is their FIRST message about jobs, ask ONE question at a time in this order:
+        1. Which specific role are they interested in? (Reference the CURRENT JOB OPENINGS from Knowledge Base if available)
+        2. What is their tech stack? (e.g., Python, React, AWS, Java, etc.)
+        3. How many years of experience do they have?
+        4. Are they willing to relocate or travel to the US for work?
+        5. What is their visa status? (US Citizen, Green Card, need TN Visa sponsorship, etc.)
         
-        RESPONSE INSTRUCTIONS:
-        - If the user asks about a topic in the Knowledge Base, YOU MUST MENTION THE SPECIFIC DETAILS (e.g., "TN Visa", "Nearshore").
-        - Keep the 'reply_text' natural and conversational (under 2 sentences).
+        Once you have collected ALL 5 pieces of information OR the user asks for a human, set "action" to "forward".
         
-        Output JSON ONLY:
-        {{
-            "intent": "string",
-            "confidence": float,
-            "reply_text": "[TAG] Short spoken response in the user's language."
-        }}
+        CLIENT FLOW (CLIENT_LEAD intent):
+        1. What roles are they looking to hire for?
+        2. What specific skills or tech stack are they looking for?
+        3. Do they prefer nearshore talent or US-based?
+        
+        Once you understand their needs OR they ask for a human, set "action" to "forward".
+        
+        INTENT CLASSIFICATION:
+        - JOB_SEEKER: Asking about jobs, careers, applying for a position, or job openings.
+        - CLIENT_LEAD: Companies/businesses wanting to hire developers or build AI products.
+        - GENERAL_INQUIRY: Hours, location, company info, or unclear questions.
+        
+        LANGUAGE TAGS:
+        - Use [EN] for English, [ES] for Spanish, [HI] for Hindi at the start of reply_text.
+        
+        CRITICAL: You MUST respond with ONLY a valid JSON object in this exact format, with no other text:
+
+        {{"intent": "JOB_SEEKER", "confidence": 0.9, "reply_text": "[EN] Your response here", "action": "speak"}}
+        
+        Do not add any explanation, markdown, or other text. Only output the JSON object.
         """
         
         try:
             message = await self.client.messages.create(
                 model=self.model,
-                max_tokens=200,
+                max_tokens=300,  # Increased for longer job-related responses
                 system=system_prompt,
                 messages=[{"role": "user", "content": text}]
             )
@@ -87,9 +105,28 @@ class LLMService:
             else:
                 raw_content = "{}" # Fallback to empty JSON if not text
             
+            # Clean up markdown code blocks if present
+            raw_content = raw_content.strip()
+            if raw_content.startswith("```"):
+                # Remove markdown code block wrapper
+                lines = raw_content.split("\n")
+                raw_content = "\n".join(lines[1:-1]) if len(lines) > 2 else raw_content
+                raw_content = raw_content.replace("```json", "").replace("```", "").strip()
+            
+            print(f"Claude Response: {raw_content[:200]}...")  # Debug: show first 200 chars
+            
             data = json.loads(raw_content)
             return AIResponse(**data)
             
+        except json.JSONDecodeError as e:
+            print(f"JSON Parse Error: {e}")
+            print(f"Raw content was: {raw_content}")
+            return AIResponse(
+                intent="ERROR",
+                confidence=0.0,
+                reply_text="I apologize, but I am having trouble connecting. Please hold.",
+                entities=[]
+            )
         except Exception as e:
             # Log the error in production (print for now)
             print(f"LLM Error: {e}")

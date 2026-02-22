@@ -7,4 +7,5 @@ __pycache__/
 .DS_Store
 chroma_db/
 app/data/chroma_db/
-readme.md
+.vscode/
+*.log

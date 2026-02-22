@@ -9,3 +9,5 @@ chromadb
 sentence-transformers
 pydantic-settings
 python-multipart
+beautifulsoup4
+requests

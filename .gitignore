@@ -1,7 +1,17 @@
 .env
+instructions.md
 
 venv/
-__pycahce__/
+__pycache__/
 *.pyc
 
 .DS_Store
+
+# ChromaDB vector database (gets regenerated from knowledge_base.txt)
+chroma_db/
+
+# VS Code settings (personal preferences)
+.vscode/
+
+# Logs
+*.log
