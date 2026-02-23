@@ -27,7 +27,7 @@ class LLMService:
         )
         print("Connected to Knowledge Base!")
         
-    async def analyze_call(self, text: str, call_memory: Optional[list] = None) -> AIResponse:
+    async def analyze_call(self, text: str, call_memory: Optional[list] = None, caller_country: str = "Unknown", caller_state: str = "Unknown") -> AIResponse:
         
         if call_memory is None:
             call_memory = []
@@ -45,6 +45,25 @@ class LLMService:
         else:
             retrieved_knowledge = "No relevant information found in the knowledge base."
             print("No relevant context found.")
+        
+        if caller_country == "US":
+            visa_rule = "- You MUST ask for their current US work authorization or visa status (e.g., US Citizen, Green Card, H1B, F1 OPT)."
+            
+            location_rule = f"""
+            - The caller is located in the US, State: {caller_state}.
+            - Check the Knowledge Base for the requested role's location.
+            - If the role's state matches '{caller_state}', silently mark 'Willingness to relocate' as resolved and DO NOT ask about it.
+            - If the role's state does NOT match '{caller_state}', ask if they are willing to relocate to the role's state.
+            """
+        else:
+            # INTERNATIONAL CALLERS
+            visa_rule = "- The caller is dialing from outside the US. You MUST ask about their current US visa status and if they require sponsorship."
+            
+            location_rule = """
+            - The caller is dialing internationally. 
+            - Ask if they are looking to work remotely from their home country (Nearshore/Offshore), OR if they are 'Travel-Ready' and willing to relocate to the US. 
+            - Do not ask about specific US states.
+            """
         
         system_prompt = f"""
         You are the Voice AI Receptionist for Bhuvi IT Solutions.
@@ -65,6 +84,8 @@ class LLMService:
         - Silently cross off the details the user has ALREADY provided.
         - ONLY ask questions about the details that are STILL MISSING.
         - DO NOT EVER repeat a question if the user already answered it in a previous turn.
+        {location_rule}
+        {visa_rule}
         - Once you have collected ALL 5 pieces of information, OR the user asks for a human, set "action" to "forward".
 
         CLIENT FLOW (CLIENT_LEAD intent):

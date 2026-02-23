@@ -1,6 +1,7 @@
 # app/main.py
 import select
 from dotenv import load_dotenv
+import twilio
 load_dotenv()
 import logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -11,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from app.schemas import CallPayload, AIResponse
 from app.services.llm_service import LLMService
 from app.services.stt_service import DeepgramSTT
+from twilio.rest import Client
 
 app = FastAPI(title="VoiceConnect API", version="0.1.0")
 
@@ -73,7 +75,7 @@ async def voice_webhook(request: Request):
     xml_response = """
         <Response>
             <Say voice="Polly.Joanna-Neural">Hello! Thank you for calling Bhuvi IT Solutions. To route you to the right team, are you calling to apply for a job, looking to hire IT talent, or interested in our custom AI development services?</Say>
-            <Record maxLength="10" timeout="3" action="/transcribe" playBeep="true"/>
+            <Record maxLength="10" timeout="2" action="/transcribe" playBeep="true"/>
         </Response>
         """
     # Return as XML so Twilio understands it
@@ -89,6 +91,8 @@ async def transcribe_webhook(request: Request):
     form_data = await request.form()
     recording_url = str(form_data.get("RecordingUrl"))
     call_sid = str(form_data.get("CallSid", "unknown"))
+    caller_country = str(form_data.get("CallerCountry", "unknown"))
+    caller_state = str(form_data.get("CallerState", "unknown"))
     
     if not recording_url:
         return Response(content="<Response><Say>I didn't hear anything.</Say></Response>", media_type="application/xml")
@@ -110,7 +114,7 @@ async def transcribe_webhook(request: Request):
     call_memory = call_sessions.get(call_sid, [])
     
     service = get_llm_service()
-    ai_response_obj = await service.analyze_call(text, call_memory=call_memory)
+    ai_response_obj = await service.analyze_call(text, call_memory=call_memory, caller_country=caller_country, caller_state=caller_state)
     ai_text = ai_response_obj.reply_text
     action = ai_response_obj.action
     
@@ -146,11 +150,30 @@ async def transcribe_webhook(request: Request):
     if action == "forward" or ai_response_obj.intent == "ERROR":
         print(f"[{call_sid}] Ready to forward. Intent: {ai_response_obj.intent}")
         
+        caller_number = str(form_data.get("From", ""))
+        twilio_number = str(form_data.get("To", ""))
+        
         # Determine message based on intent
         if ai_response_obj.intent == "ERROR":
             forward_message = ai_response_obj.reply_text
         elif ai_response_obj.intent == "JOB_SEEKER":
             forward_message = "Thank you for your interest! Let me forward you to a recruiter who can assist you further."
+            
+            # SMS Logic
+            try:
+                from app.config import settings
+                client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+                sms_text = f"Thanks for speaking with Bhuvi IT Solutions! To complete your profile, please upload your resume and documents here: https://bhuviits.com/apply. Our team will review your information and get back to you shortly!"
+                
+                client.messages.create(
+                    body=sms_text,
+                    from_=twilio_number,
+                    to=caller_number
+                )
+                print(f"[{call_sid}] Success: SMS sent to {caller_number}")
+            except Exception as e:
+                print(f"Error sending SMS: {e}")
+            
         elif ai_response_obj.intent == "CLIENT_LEAD":
             forward_message = "Thank you for reaching out! Let me forward you to our representative who can discuss your needs."
         else:
@@ -186,7 +209,7 @@ async def transcribe_webhook(request: Request):
         <Response>
             <Say voice="Polly.Joanna-Neural">{clean_text}</Say>
             <Pause length="1"/>
-            <Record maxLength="30" timeout="3" action="/transcribe" playBeep="true"/>
+            <Record maxLength="30" timeout="2" action="/transcribe" playBeep="true"/>
         </Response>
         """
     
