@@ -33,7 +33,7 @@ class DeepgramSTT:
                 url=audio_url,
                 model="nova-2-phonecall",
                 smart_format=True,
-                detect_language=True,
+                language="en-US"
             )
 
             results = getattr(response, "results", None)

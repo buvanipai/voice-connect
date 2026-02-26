@@ -11,3 +11,4 @@ pydantic-settings
 python-multipart
 beautifulsoup4
 requests
+google-cloud-firestore

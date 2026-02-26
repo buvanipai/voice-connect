@@ -15,3 +15,4 @@ chroma_db/
 
 # Logs
 *.log
+*.json

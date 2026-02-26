@@ -38,16 +38,53 @@ sections = content.split("CURRENT JOB OPENINGS")
 
 documents = []
 
-# Add company info as line-by-line chunks
+# --- COMPANY INFO SECTION ---
+# Add company info as individual descriptive chunks (better for RAG retrieval)
 if sections[0].strip():
     company_lines = [line.strip() for line in sections[0].strip().split("\n") if line.strip()]
     documents.extend(company_lines)
 
-# Add job section as one complete chunk
+# Add explicit location and relocation info for better retrieval
+documents.extend([
+    "Bhuvi IT Solutions is headquartered in Schaumburg, IL 60173.",
+    "All job positions are located in Schaumburg, IL.",
+    "Candidates are required to be willing to work onsite or travel to the US for available positions.",
+    "The company offers TN Visa sponsorship and can deploy engineers quickly to the US.",
+    "Nearshore delivery using talent from Mexico, Chile, and Argentina is a core offering."
+])
+
+# --- JOB LISTINGS SECTION ---
+# Parse individual jobs from the section and create structured chunks
 if len(sections) > 1:
-    job_section = "CURRENT JOB OPENINGS" + sections[1]
-    # Also add it as one big chunk
-    documents.append(job_section.strip())
+    job_section = sections[1]
+    
+    # Split by lines and group jobs
+    lines = [line.strip() for line in job_section.split("\n") if line.strip()]
+    
+    current_job = []
+    for line in lines:
+        # Detect job titles (start with number + period)
+        if line and line[0].isdigit() and "." in line[:3]:
+            # Save previous job if exists
+            if current_job:
+                job_text = "\n".join(current_job).strip()
+                if job_text:
+                    documents.append(job_text)
+            current_job = [line]
+        else:
+            if current_job:
+                current_job.append(line)
+    
+    # Add the last job
+    if current_job:
+        job_text = "\n".join(current_job).strip()
+        if job_text:
+            documents.append(job_text)
+    
+    # Add summary chunks for each role mentioning location
+    role_keywords = ["Software Engineer", "Systems Analyst", "UX Designer", "Graphic Designer", "Program Manager"]
+    for role in role_keywords:
+        documents.append(f"{role} position available in Schaumburg, IL. Requires willingness to work onsite or travel to the US.")
     
     # Additionally, split individual job entries for better retrieval
     job_lines = sections[1].strip().split("\n")
@@ -74,4 +111,23 @@ collection.add(
     ids=ids
 )
 
-print(f"✅ Successfully stored {len(documents)} facts in the Vector Database!")
+print(f"✅ Successfully stored {len(documents)} chunks in the Vector Database!")
+
+# 8. TEST RETRIEVAL - Verify location and job information is retrievable
+print("\n" + "="*60)
+print("TESTING RAG RETRIEVAL - Verifying Location Context")
+print("="*60)
+
+test_queries = [
+    "What is the job location?",
+    "Where are positions based in Illinois?",
+    "Do I need to relocate to work here?",
+    "Tell me about Software Engineer roles",
+    "What UX positions are available?",
+    "I am in Mexico, can I work remotely?",
+]
+
+for query in test_queries:
+    results = collection.query(query_texts=[query], n_results=2)
+    print(f"\n📍 Query: '{query}'")
+    print(f"   Top match: {results['documents'][0][0][:80]}...")

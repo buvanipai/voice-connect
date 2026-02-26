@@ -1,6 +1,8 @@
 # app/main.py
+import datetime
 import select
 from dotenv import load_dotenv
+from requests import get
 import twilio
 load_dotenv()
 import logging
@@ -12,7 +14,9 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from app.schemas import CallPayload, AIResponse
 from app.services.llm_service import LLMService
 from app.services.stt_service import DeepgramSTT
+from app.services.profile_services import ProfileService
 from twilio.rest import Client
+from contextlib import asynccontextmanager
 
 app = FastAPI(title="VoiceConnect API", version="0.1.0")
 
@@ -36,6 +40,16 @@ def get_stt_service():
         print("[INFO] Initializing DeepgramSTT for the first time.")
         _stt_instance = DeepgramSTT()
     return _stt_instance
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("[INFO] Pre-loading AI models...")
+    get_llm_service()
+    get_stt_service()
+    print("[INFO] AI models loaded successfully.")
+    yield
+
+app = FastAPI(title="VoiceConnect API", version="0.1.0", lifespan=lifespan)
 
 @app.get("/")
 def home():
@@ -65,17 +79,38 @@ async def voice_webhook(request: Request):
     # Get CallSid to track this conversation
     form_data = await request.form()
     call_sid = str(form_data.get("CallSid", "unknown"))
+    caller_number = str(form_data.get("From", "unknown"))
     
     # Initialize conversation history for this call
     if call_sid not in call_sessions:
         call_sessions[call_sid] = []
         print(f"[NEW CALL] CallSid: {call_sid}")
     
+    # Check if this is a returning caller
+    profile_service = ProfileService()
+    profile_data = profile_service.get_profile(caller_number)
+    
+    # Personalized greeting for returning callers
+    if profile_data and profile_data.get("last_intent") == "JOB_SEEKER":
+        # Use conversational fallbacks instead of "unknown"
+        role = profile_data.get('role_interest', 'an open position')
+        exp = profile_data.get('experience_years', 'some')
+        skills = profile_data.get('tech_stack', 'your technical skills')
+        location = profile_data.get('caller_location', 'your location')
+        greeting = f"Welcome back! I have your profile for the {role} role, {exp} years in {skills}, based in {location}. Is this still accurate, or do you need to update anything?"
+        print(f"[RETURNING CALLER] {caller_number} - Greeting generated.")
+    elif profile_data and profile_data.get("last_intent") == "CLIENT_LEAD":
+        greeting = "Welcome back to Bhuvi IT Solutions! How can I help with your hiring needs today?"
+    else:
+        # New caller - use generic greeting
+        greeting = "Hello! Thank you for calling Bhuvi IT Solutions. Are you calling to apply for a job, looking to hire IT talent, or interested in AI development?"
+        print(f"[NEW CALLER] {caller_number}")
+    
     # Simple XML response (TwiML)
-    xml_response = """
+    xml_response = f"""
         <Response>
-            <Say voice="Polly.Joanna-Neural">Hello! Thank you for calling Bhuvi IT Solutions. To route you to the right team, are you calling to apply for a job, looking to hire IT talent, or interested in our custom AI development services?</Say>
-            <Record maxLength="10" timeout="2" action="/transcribe" playBeep="true"/>
+            <Say voice="Polly.Joanna-Neural">{greeting}</Say>
+            <Record maxLength="10" timeout="2" trim="trim-silence" action="/transcribe" playBeep="false"/>
         </Response>
         """
     # Return as XML so Twilio understands it
@@ -93,28 +128,71 @@ async def transcribe_webhook(request: Request):
     call_sid = str(form_data.get("CallSid", "unknown"))
     caller_country = str(form_data.get("CallerCountry", "unknown"))
     caller_state = str(form_data.get("CallerState", "unknown"))
+    print(f"[{call_sid}] DEBUG: Twilio reports CallerState as: '{caller_state}'")
+    caller_number = str(form_data.get("From", "unknown"))
     
     if not recording_url:
         return Response(content="<Response><Say>I didn't hear anything.</Say></Response>", media_type="application/xml")
     
     # Deepgram to convert audio to text
     stt = get_stt_service()
-    text = await stt.transcribe(recording_url)
+    
+    print(f"[{call_sid}] Sending URL to Deepgram: {recording_url}") # Let's verify the URL exists
+    
+    try:
+        text = await stt.transcribe(recording_url)
+        print(f"[{call_sid}] RAW DEEPGRAM TEXT: '{text}'")
+    except Exception as e:
+        print(f"[{call_sid}] DEEPGRAM CRASHED: {str(e)}")
+        text = ""
     
     print(f"[{call_sid}] User said: {text}")
     
     if not text or not text.strip():
         print("User was silent. Asking them to repeat.")
         return Response(
-            content="<Response><Say>I didn't catch that. Could you please repeat?</Say><Record maxLength='10' timeout='3' action='/transcribe' playBeep='true'/></Response>", 
+            content="<Response><Say>I didn't catch that. Could you please repeat?</Say><Record maxLength='10' timeout='3' action='/transcribe' playBeep='false'/></Response>", 
             media_type="application/xml"
         )
     
     # Get conversation history for this call
     call_memory = call_sessions.get(call_sid, [])
+    profile_service = ProfileService()
+    profile_data = profile_service.get_profile(caller_number) or {}
     
     service = get_llm_service()
-    ai_response_obj = await service.analyze_call(text, call_memory=call_memory, caller_country=caller_country, caller_state=caller_state)
+    ai_response_obj = await service.analyze_call(
+        text, 
+        call_memory=call_memory, 
+        caller_country=caller_country, 
+        caller_state=caller_state,
+        user_profile=profile_data
+    )
+    
+    # GUARDRAIL: Do NOT save profile data if the LLM returned an ERROR intent
+    # This prevents corrupting good profile data when the system has a technical issue
+    if ai_response_obj.intent != "ERROR":
+        try:
+            # Merge extracted entities into the profile
+            updated_data = {
+                "last_intent": ai_response_obj.intent,
+                "last_interaction": datetime.datetime.now().isoformat(),
+            }
+            
+            # Extract and save specific entities (role, experience, visa, etc.)
+            if ai_response_obj.entities:
+                for key, value in ai_response_obj.entities.items():
+                    # Only save non-empty string values, skip None/empty
+                    if value and isinstance(value, str) and value.strip():
+                        updated_data[key] = value.strip()
+            
+            profile_service.update_profile(caller_number, updated_data)
+            print(f"[{call_sid}] Profile updated with entities: {ai_response_obj.entities}")
+        except Exception as e:
+            print(f"Error updating profile: {e}")
+    else:
+        print(f"[{call_sid}] GUARDRAIL: Skipping profile update due to ERROR intent")
+    
     ai_text = ai_response_obj.reply_text
     action = ai_response_obj.action
     
@@ -122,7 +200,8 @@ async def transcribe_webhook(request: Request):
     call_memory.append({
         "user": text,
         "ai": ai_text,
-        "intent": ai_response_obj.intent
+        "intent": ai_response_obj.intent,
+        "entities": ai_response_obj.entities
     })
     call_sessions[call_sid] = call_memory
     
@@ -153,31 +232,21 @@ async def transcribe_webhook(request: Request):
         caller_number = str(form_data.get("From", ""))
         twilio_number = str(form_data.get("To", ""))
         
-        # Determine message based on intent
-        if ai_response_obj.intent == "ERROR":
-            forward_message = ai_response_obj.reply_text
-        elif ai_response_obj.intent == "JOB_SEEKER":
-            forward_message = "Thank you for your interest! Let me forward you to a recruiter who can assist you further."
-            
-            # SMS Logic
+        # WhatsApp Logic for JOB_SEEKER - send resume upload link
+        if ai_response_obj.intent == "JOB_SEEKER":
             try:
                 from app.config import settings
                 client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-                sms_text = f"Thanks for speaking with Bhuvi IT Solutions! To complete your profile, please upload your resume and documents here: https://bhuviits.com/apply. Our team will review your information and get back to you shortly!"
+                wa_message = f"Thanks for speaking with Bhuvi IT Solutions! To complete your profile, please upload your resume and documents here: https://bhuviits.com/apply. Our team will review your information and get back to you shortly!"
                 
                 client.messages.create(
-                    body=sms_text,
-                    from_=twilio_number,
-                    to=caller_number
+                    body=wa_message,
+                    from_=f"whatsapp:+14155238886",
+                    to=f"whatsapp:{caller_number}"
                 )
-                print(f"[{call_sid}] Success: SMS sent to {caller_number}")
+                print(f"[{call_sid}] Success: WhatsApp message sent to {caller_number}")
             except Exception as e:
-                print(f"Error sending SMS: {e}")
-            
-        elif ai_response_obj.intent == "CLIENT_LEAD":
-            forward_message = "Thank you for reaching out! Let me forward you to our representative who can discuss your needs."
-        else:
-            forward_message = "Thank you for calling. Let me connect you to our team."
+                print(f"[{call_sid}] Error sending WhatsApp message: {e}")
         
         # Generate call whisper (summary) for the recruiter
         service = get_llm_service()
@@ -192,11 +261,10 @@ async def transcribe_webhook(request: Request):
         if call_sid in call_sessions:
             del call_sessions[call_sid]
         
-        # For testing: Play end message + whisper, then hang up
-        # In production, you'd dial Subbu and play whisper to them
+        # Play the AI's actual response first, then pause, then play recruiter brief
         xml_response = f"""
             <Response>
-                <Say voice="Polly.Joanna-Neural">{forward_message}</Say>
+                <Say voice="{selected_voice}">{clean_text}</Say>
                 <Pause length="1"/>
                 <Say voice="Polly.Joanna-Neural">[RECRUITER BRIEF: {call_whisper}]</Say>
                 <Hangup/>
@@ -208,8 +276,8 @@ async def transcribe_webhook(request: Request):
     xml_response = f"""
         <Response>
             <Say voice="Polly.Joanna-Neural">{clean_text}</Say>
-            <Pause length="1"/>
-            <Record maxLength="30" timeout="2" action="/transcribe" playBeep="true"/>
+            <Pause length="2"/>
+            <Record maxLength="30" timeout="2" trim="trim-silence" action="/transcribe" playBeep="false"/>
         </Response>
         """
     

@@ -10,35 +10,72 @@ We save clients money by offering senior AI talent at nearshore rates compared t
 Bhuvi IT Solutions is a US-based company headquartered at 1699 Woodfield Road, Schaumburg, IL 60173. 
 We have a subsidiary called NearMind, which is a LatAm-based company operating in Mexico, Chile, and Argentina. We also have office locations in India and Canada.
 
-CURRENT JOB OPENINGS (Updated: February 21, 2026):
+CURRENT JOB OPENINGS (Updated: February 26, 2026):
 
 1. SOFTWARE ENGINEER
+   - Location: Schaumburg
+   - REQUIREMENTS:
+     * Experience: 2+ years
+     * Tech Stack: Aws, Data Science, Kubernetes, Node.Js, Python, React, Typescript
+     * Work Arrangement: Travel required
+   - Full Details: December 23, 2025 Bhuvi Admin Jobs Develop web based UI and backend to facilitate data ingestion, storage, annotation and visualization. Design and develop client side APIs and librariesto interface with server, cloud storage and compute platforms. Work with a data science teamand transform the requ...
    - Posted: Date unknown
    - More info: https://bhuviits.com/software-engineer/
 
 2. SR COMPUTER SYSTEMS ANALYST
+   - Location: Schaumburg
+   - REQUIREMENTS:
+     * Experience: 5+ years
+     * Work Arrangement: Travel required
+   - Full Details: December 3, 2025 Bhuvi Admin Jobs Design and buildadvanced applications for the Android and iOS platform. Collaborate with cross-functional teamsto define, design, and ship new features. Unit-testcode for robustness, including edge cases, usability, and general reliability. Work on bug fixingandimpr...
    - Posted: Date unknown
    - More info: https://bhuviits.com/sr-computer-systems-analyst/
 
 3. UX DESIGNER
+   - Location: Schaumburg
+   - REQUIREMENTS:
+     * Experience: 2+ years
+     * Tech Stack: Analytics
+     * Work Arrangement: Travel required
+   - Full Details: October 23, 2025 Bhuvi Admin Jobs Research and Analysis:Conduct thorough market research to understand user needs and behaviors. Analyze competitors to identify best practices and areas for improvement. Design and Prototyping:Create wireframes, flow diagrams, and customer journey maps to visualize t...
    - Posted: Date unknown
    - More info: https://bhuviits.com/ux-designer/
 
 4. GRAPHIC DESIGNER
+   - Location: Schaumburg
+   - REQUIREMENTS:
+     * Experience: 2+ years
+     * Tech Stack: Analytics
+     * Work Arrangement: Travel required
+   - Full Details: February 28, 2025 Bhuvi Admin Jobs,Uncategorized Bhuvi IT Solutions, Inc. (Schaumburg, IL) needs Graphic Designer:Integrating research, comparatives, analysis, prototype, design on how it will lookand the final product, best practices, test, review the analytics and iterate whatneeds to be redesigne...
    - Posted: Date unknown
    - More info: https://bhuviits.com/graphic-designer/
 
 5. TECHNICAL PROGRAM MANAGER
+   - Location: Schaumburg
+   - REQUIREMENTS:
+     * Experience: 5+ years
+     * Work Arrangement: Travel required
+   - Full Details: May 2, 2023 bhuvi Jobs Will provide project management throughout the life of the project including project charters, project plans, project analysis, project expenses, project requirements, project specifications, validation requirements, acceptance of documentation and deployment of internal and e...
    - Posted: Date unknown
    - More info: https://bhuviits.com/technical-program-manager/
 
 6. SR. UI/UX DESIGNER
+   - Location: Schaumburg
+   - REQUIREMENTS:
+     * Experience: 5+ years
+     * Work Arrangement: Travel required
+   - Full Details: November 21, 2022 bhuvi Jobs Plan and execute design ideas to improve user experience along with mobile applications. Preparing deliverables such as wireframes, interaction documents, user flows, prototypes and mockups. Introducing brand-landing pages, which increase the online traffic. Travel/reloc...
    - Posted: Date unknown
    - More info: https://bhuviits.com/senior-ui-ux-designer-2/
 
 7. SR. UI/UX DESIGNER
+   - Location: Schaumburg
+   - REQUIREMENTS:
+     * Experience: 2+ years
+     * Work Arrangement: Travel required
+   - Full Details: November 1, 2022 bhuvi Jobs Plan and execute design ideas to improve user experience along with mobile applications. Preparing deliverables such as wireframes, interaction documents, user flows, prototypes and mockups. Introducing brand-landing pages, which increase the online traffic. Travel/reloca...
    - Posted: Date unknown
    - More info: https://bhuviits.com/senior-ui-ux-designer/
 
-All positions are located in Schaumburg, IL. Candidates should be willing to work onsite or travel to the US.
-For more details visit: https://bhuviits.com/category/jobs/
+For more details and to check for additional positions, visit: https://bhuviits.com/category/jobs/
