@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Resume | Bhuvi IT Solutions</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        h2 {
+            margin-top: 0;
+            color: #111827;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        input[type="file"] {
+            display: block;
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+        }
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+        #message {
+            margin-top: 1rem;
+            font-size: 0.875rem;
+            text-align: center;
+        }
+        .success { color: #166534; }
+        .error { color: #991b1b; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Upload Your Resume</h2>
+    <form id="uploadForm">
+        <div class="form-group">
+            <input type="file" id="fileInput" name="file" accept=".pdf,.doc,.docx" required>
+        </div>
+        <button type="submit" id="submitBtn">Upload Resume</button>
+    </form>
+    <div id="message"></div>
+</div>
+
+<script>
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const fileInput = document.getElementById('fileInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const messageDiv = document.getElementById('message');
+        
+        if (fileInput.files.length === 0) {
+            showMessage('Please select a file.', 'error');
+            return;
+        }
+
+        const file = fileInput.files[0];
+        
+        // Basic client-side validation for file size (e.g., max 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            showMessage('File size must be less than 5MB.', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        // Set loading state
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Uploading...';
+        messageDiv.textContent = '';
+
+        try {
+            const response = await fetch('/upload-resume', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                showMessage('Resume uploaded successfully! You can close this window.', 'success');
+                fileInput.value = ''; // Clear the input
+            } else {
+                showMessage(result.detail || 'Upload failed. Please try again.', 'error');
+            }
+        } catch (error) {
+            showMessage('A network error occurred. Please try again.', 'error');
+        } finally {
+            // Reset button state
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Upload Resume';
+        }
+    });
+
+    function showMessage(text, className) {
+        const messageDiv = document.getElementById('message');
+        messageDiv.textContent = text;
+        messageDiv.className = className;
+    }
+</script>
+
+</body>
+</html>

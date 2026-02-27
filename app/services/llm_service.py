@@ -40,32 +40,71 @@ class LLMService:
             pass
         return False
     
-    def _check_job_seeker_missing(self, profile: dict, caller_location: str) -> List[str]:
+    def _check_job_seeker_missing(self, profile: dict) -> List[str]:
         """Check which fields are missing for JOB_SEEKER candidates.
-        Returns list of missing field names.
+        
+        CONVERSATIONAL FLOW:
+        1. role_interest, experience_years, tech_stack (basic info)
+        2. caller_location (WHERE are they?) - THIS TRIGGERS CONDITIONAL LOGIC
+           If US:
+             - caller_state (which state?)
+             - visa_status (work authorization)
+             - visa_sponsorship (do they need sponsorship?)
+           If NOT US (and in TN visa countries):
+             - visa_sponsorship_preference (nearshore/remote/visa help?)
+        3. relocation_willing (if location doesn't match job locations)
         """
-        required = ["role_interest", "experience_years", "tech_stack", "caller_location", "visa_status"]
+        profile = profile or {}
         missing = []
         
-        # Sanitize inputs
-        profile = profile or {}
-        caller_location = str(caller_location).strip() if caller_location else ""
+        # PHASE 1: Basic professional info (always required)
+        required_base = ["role_interest", "experience_years", "tech_stack"]
+        for field in required_base:
+            field_value = profile.get(field)
+            if not field_value or (isinstance(field_value, str) and not field_value.strip()):
+                missing.append(field)
         
-        for field in required:
-            if field == "caller_location":
-                # Check if we have caller's location
-                if not caller_location or caller_location.lower() == "unknown":
-                    missing.append(field)
-            else:
-                # Check if field exists and has content
-                field_value = profile.get(field)
-                if not field_value or (isinstance(field_value, str) and not field_value.strip()):
-                    missing.append(field)
+        # PHASE 2: Location (this is THE critical question that gates everything)
+        caller_location = profile.get("caller_location")
+        if not caller_location or (isinstance(caller_location, str) and not caller_location.strip()):
+            missing.append("caller_location")  # Ask "Where are you located?"
+            return missing  # Stop here - everything else depends on location answer
         
-        # If location is known but doesn't match jobs, add relocation query to missing
-        if "caller_location" not in missing and caller_location and caller_location.lower() != "unknown":
-            if not self._check_location_match(caller_location):
-                missing.append("relocation_willing")
+        # At this point, we know their location. Determine what location-based questions to ask.
+        location_str = str(caller_location).lower().strip()
+        is_us = "us" in location_str or "usa" in location_str or "united states" in location_str or "america" in location_str
+        
+        if is_us:
+            # US CALLER: Ask for state, then work authorization, then sponsorship
+            caller_state = profile.get("caller_state")
+            if not caller_state or (isinstance(caller_state, str) and not caller_state.strip()):
+                missing.append("caller_state")  # Ask "Which state?"
+                return missing  # Stop - can't ask visa questions until we know their state
+            
+            # Now ask about work authorization
+            visa_status = profile.get("visa_status")
+            if not visa_status or (isinstance(visa_status, str) and not visa_status.strip()):
+                missing.append("visa_status")  # Ask "What's your work authorization status?"
+                return missing
+            
+            # Now ask if they need sponsorship
+            visa_sponsorship = profile.get("visa_sponsorship")
+            if not visa_sponsorship or (isinstance(visa_sponsorship, str) and not visa_sponsorship.strip()):
+                missing.append("visa_sponsorship")  # Ask "Do you need visa sponsorship?"
+                return missing
+        else:
+            # INTERNATIONAL CALLER: Ask about visa sponsorship/nearshore/remote preferences
+            visa_sponsorship_pref = profile.get("visa_sponsorship_preference")
+            if not visa_sponsorship_pref or (isinstance(visa_sponsorship_pref, str) and not visa_sponsorship_pref.strip()):
+                missing.append("visa_sponsorship_preference")  # Ask about options
+                return missing
+        
+        # PHASE 3: Relocation (only if location doesn't match job locations)
+        # Check if their location matches any job location
+        if not self._check_location_match(caller_location):
+            relocation_willing = profile.get("relocation_willing")
+            if not relocation_willing or (isinstance(relocation_willing, str) and not relocation_willing.strip()):
+                missing.append("relocation_willing")  # Ask "Are you open to relocate?"
         
         return missing
         
@@ -73,6 +112,9 @@ class LLMService:
         
         if call_memory is None:
             call_memory = []
+        
+        # DEBUG: Uncomment the line below to test international caller logic
+        # caller_country = "India"  # Force international for testing
         
         results = self.collection.query(
             query_texts=[text],
@@ -94,21 +136,30 @@ class LLMService:
             if exchange.get("entities"):
                 current_profile.update(exchange["entities"])
         
+        print(f"[LLM CONTEXT] Starting profile: {current_profile}")
+        print(f"[LLM CONTEXT] Call memory length: {len(call_memory)} exchanges")
+        
         # --- DETERMINE WHAT'S MISSING (PYTHON LOGIC) ---
-        missing_fields = self._check_job_seeker_missing(current_profile, caller_state)
+        missing_fields = self._check_job_seeker_missing(current_profile)
         
         # --- LOCATION-BASED JOB MATCH ---
         available_jobs = ", ".join(settings.JOB_LOCATIONS)
         location_context = ""
-        if current_profile.get("caller_location"):
-            if self._check_location_match(current_profile["caller_location"]):
-                location_context = f"Caller is in {current_profile['caller_location']}, which matches our job locations: {available_jobs}."
-            else:
-                location_context = f"Caller is in {current_profile['caller_location']}, but we have jobs in: {available_jobs}. We may need to ask about relocation."
         
-        # --- VISA RULES ---
+        # Use caller_state from Twilio as the primary location source
+        caller_location_to_check = current_profile.get("caller_location") or caller_state
+        
+        if caller_location_to_check and caller_location_to_check.lower() != "unknown":
+            if self._check_location_match(caller_location_to_check):
+                location_context = f"Caller is in {caller_location_to_check}, which matches our job locations: {available_jobs}."
+            else:
+                location_context = f"Caller is in {caller_location_to_check}, but we have jobs in: {available_jobs}. We may need to ask about relocation or nearshore options."
+        
+        # --- VISA RULES (country-specific) ---
         if caller_country == "US":
             visa_rule = "- Ask for their current US work authorization (e.g., US Citizen, Green Card, H1B)."
+        elif caller_country == "MX":
+            visa_rule = "- Caller is from Mexico. Offer TN Visa sponsorship - it's faster and easier than H1B for Mexican citizens. Ask if they need visa sponsorship."
         else:
             visa_rule = "- Caller is International. Ask about US visa status and sponsorship requirements."
         
@@ -119,19 +170,25 @@ class LLMService:
             known_facts = [
                 f"{k}: {v}" for k, v in current_profile.items() 
                 if v and (isinstance(v, str) and v.strip() or not isinstance(v, str))
-                and k in ['role_interest', 'experience_years', 'visa_status', 'tech_stack', 'caller_location']
+                and k in ['role_interest', 'experience_years', 'visa_status', 'tech_stack', 'caller_location', 'caller_state', 'visa_sponsorship', 'visa_sponsorship_preference', 'relocation_willing']
             ]
             if known_facts:
                 user_context = f"KNOWN PROFILE DATA: {', '.join(known_facts)}. DO NOT ASK FOR THESE."
+        
+        # --- BUILD MISSING FIELDS INSTRUCTION ---
+        missing_fields_instruction = ""
+        if missing_fields:
+            missing_fields_str = ", ".join(missing_fields)
+            missing_fields_instruction = f"\nCRITICAL: You MUST focus on collecting these MISSING fields from the user:\n{missing_fields_str}\n\nDO NOT ask about any other fields. DO NOT extract fields that the user has not explicitly provided."
 
-        # --- THE OPTIMIZED SYSTEM PROMPT ---
+        # --- THE OPTIMIZED SYSTEM PROMPT (NEW CONVERSATIONAL FLOW) ---
         system_prompt = f"""
         You are the Voice AI Receptionist for Bhuvi IT Solutions.
         
         CONTEXT:
         {user_context}
         {location_context}
-        {visa_rule}
+        {visa_rule}{missing_fields_instruction}
         
         KNOWLEDGE BASE (For answering general questions):
         {retrieved_knowledge}
@@ -140,10 +197,46 @@ class LLMService:
         Categorize the user into one of these intents and follow the specific rules:
 
         1. JOB_SEEKER (Candidate looking for a job)
-           - GOAL: Collect 5 details: Role Interest, Tech Stack, Experience Years, Caller Location (where they are), Visa Status.
-           - If location doesn't match available jobs ({available_jobs}), also confirm they are willing to relocate.
-           - {location_context}
-           - CRITICAL: Once all details are collected, you MUST say: "I am sending a text message with a link for you to upload your resume and connecting you with our recruiter for the next steps."
+           
+           SPECIAL CASE - RETURNING CALLER PROFILE CONFIRMATION:
+           If the conversation history shows we asked "Is this still accurate?" and the user confirms (says "yes", "correct", "accurate", "that's right", etc.):
+           - Set action: "forward" immediately
+           - Reply: "Great! I'm sending a text with a resume upload link and connecting you with our recruiter now."
+           - Keep all existing entities from their profile
+           - DO NOT ask any more questions
+           
+           CONVERSATION FLOW (for new callers or profile updates):
+           
+           STEP 1: Basic Professional Info
+           - Ask: "What role are you interested in?"
+           - Ask: "What's your tech stack or main technologies?"
+           - Ask: "How many years of professional experience do you have?"
+           - Extract: role_interest, tech_stack, experience_years
+           
+           STEP 2: Location & Visa (THE CRITICAL GATING QUESTION)
+           - Ask: "Where are you located?" (e.g., "What country/state are you in?")
+           - Extract: caller_location
+           - STOP and wait for answer. Everything below depends on this.
+           
+           STEP 3: CONDITIONAL LOCATION-BASED QUESTIONS (choose based on their location)
+           
+           IF US CALLER (said "United States", "USA", "US", or a US state):
+             a. Ask: "Which state are you in?" (if not already mentioned)
+                Extract: caller_state
+             b. Ask: "What's your current work authorization status? Are you a US Citizen, Green Card holder, on H1B, or would you need sponsorship?"
+                Extract: visa_status (e.g., "US Citizen", "Green Card", "H1B", "Need sponsorship")
+             c. Ask: "Do you need visa sponsorship to work in the US?"
+                Extract: visa_sponsorship (e.g., "Yes", "No", "Already have visa")
+           
+           IF NOT US (International caller):
+             Ask: "We have nearshore opportunities (remote work from your location) or you could need visa sponsorship to work in the US. Are you open to nearshore/remote work, or would you prefer US visa sponsorship, or both?"
+             Extract: visa_sponsorship_preference (e.g., "Open to nearshore", "Need US visa sponsorship", "Both options")
+           
+           STEP 4: Relocation Check (only if their location doesn't match job locations)
+           - Ask: "Our jobs are located in {available_jobs}. Are you willing to relocate if your location doesn't match?"
+           - Extract: relocation_willing (e.g., "Yes", "No", "Maybe")
+           
+           - CRITICAL: Once all required details are collected, you MUST say: "I am sending a text message with a link for you to upload your resume and connecting you with our recruiter for the next steps."
            - NEVER ask for email address, phone number, or any other contact information. The system handles everything via SMS.
            - After confirming all details are collected, set "action": "forward" immediately.
            - DO NOT ask for email, phone, name, or personal contact info under any circumstances.
@@ -157,14 +250,16 @@ class LLMService:
            - Keep answering until they are satisfied. 
            - Set "action": "forward" ONLY if they explicitly ask to speak to a human.
 
-        ENTITY EXTRACTION (JOB_SEEKER):
-        Extract these fields from the conversation:
+        ENTITY EXTRACTION (JOB_SEEKER - COMPLETE LIST):
         - "role_interest": Job title or role they want (e.g., "Python Developer", "Data Engineer")
         - "tech_stack": Technologies they know or want to work with (e.g., "Python, React, AWS")
-        - "experience_years": Years of professional experience (e.g., "3", "5+")
-        - "caller_location": Where they are currently located (e.g., "Chicago, IL", "Texas", "Austin")
-        - "visa_status": Their work authorization status in the US (e.g., "US Citizen", "Green Card", "Need H1B sponsorship")
-        - "relocation_willing": (ONLY if location doesn't match jobs) Whether they're willing to relocate/work onsite (e.g., "Yes", "No", "Open to discussing")
+        - "experience_years": Years of professional experience (e.g., "3", "5+", "10 years")
+        - "caller_location": Country or general location (e.g., "United States", "India", "Mexico")
+        - "caller_state": (US ONLY) Which state they're in (e.g., "California", "New York")
+        - "visa_status": (US ONLY) Work authorization status (e.g., "US Citizen", "Green Card", "H1B", "Need sponsorship")
+        - "visa_sponsorship": (US ONLY) Do they need sponsorship? (e.g., "Yes", "No", "Already have visa")
+        - "visa_sponsorship_preference": (INTERNATIONAL ONLY) Their preference (e.g., "Nearshore remote", "US visa sponsorship", "Both")
+        - "relocation_willing": (CONDITIONAL) Only if their location doesn't match job locations (e.g., "Yes", "No", "Open to it")
         
         CRITICAL INSTRUCTION ON MEMORY & STATE (APPLIES TO ALL INTENTS):
         You will see your past responses in the chat history as JSON objects.
@@ -181,20 +276,24 @@ class LLMService:
         - Keep responses to 1-2 short sentences maximum.
         - Ask ONE question at a time.
         
-        OUTPUT FORMAT:
-        Return ONLY a valid JSON object. No markdown, no explanations.
-        {{
-            "intent": "CLIENT_LEAD",
-            "confidence": 0.95,
-            "entities": {{
-                "hiring_roles": "Data Scientists",
-                "hiring_preference": "US-based"
-            }},
-            "reply_text": "[EN] Excellent. And what specific tech stack or skills are you looking for in these Data Scientists?",
-            "action": "speak"
-        }}
+        ⚠️ MANDATORY JSON OUTPUT FORMAT ⚠️
+        Your response MUST ALWAYS be ONLY a valid JSON object. Nothing else.
+        - Do NOT include markdown code blocks (no ```)
+        - Do NOT include any explanatory text before or after the JSON
+        - Do NOT apologize or use conversational language
+        - Your ENTIRE response must be valid JSON that can be parsed by Python's json.loads()
         
-        CRITICAL INSTRUCTION: You MUST output ONLY valid JSON. Do not include any conversational text, pleasantries or explanations outside of the JSON block. Your entire response must be parseable by Python's json.loads().
+        CORRECT FORMAT:
+        {{"intent": "JOB_SEEKER", "confidence": 0.95, "entities": {{"role_interest": "Python Developer"}}, "reply_text": "Great! What technologies do you work with?", "action": "speak"}}
+        
+        WRONG FORMATS (DO NOT DO THESE):
+        ❌ I'll respond with... (explanatory text)
+        ❌ ```json\n{{"intent": ...}} (code block)
+        ❌ First, let me say... (conversational preamble)
+        ❌ {{"entities": null}} (null values in entities - extract actual values from user input)
+        
+        If user input is unclear, still respond with JSON. For example:
+        {{"intent": "JOB_SEEKER", "confidence": 0.5, "entities": {{}}, "reply_text": "I didn't catch that. Could you please repeat?", "action": "speak"}}
         
         """
 
@@ -220,7 +319,7 @@ class LLMService:
         try:
             message = await self.client.messages.create(
                 model=self.model,
-                max_tokens=250,  # Reduced to enforce brevity and prevent webhook timeouts
+                max_tokens=600,  # Reduced to enforce brevity and prevent webhook timeouts
                 system=system_prompt,
                 messages=chat_messages
             )
@@ -251,11 +350,18 @@ class LLMService:
             
             raw_content = raw_content.replace("\n", " ").replace("\r", " ")
             data = json.loads(raw_content)
-            return AIResponse(**data)
+            response = AIResponse(**data)
+            
+            print(f"LLM Intent: {response.intent}")
+            print(f"LLM Entities Extracted: {response.entities}")
+            print(f"LLM Reply: {response.reply_text}")
+            
+            return response
             
         except json.JSONDecodeError as e:
-            print(f"JSON Parse Error: {e}")
-            print(f"Raw content was: {raw_content}")
+            print(f"❌ JSON Parse Error: {e}")
+            print(f"❌ Claude returned non-JSON text. Raw response: {raw_content[:300]}")
+            print(f"⚠️  System prompt may need adjustment - Claude is not following JSON-only instruction")
             return AIResponse(
                 intent="ERROR",
                 confidence=0.0,
@@ -274,13 +380,51 @@ class LLMService:
                 entities={}
             )
     
-    async def generate_call_summary(self, intent: str, call_memory: list) -> str:
+    async def generate_call_summary(self, intent: str, call_memory: list, profile_data: Optional[dict] = None) -> str:
         """
         Generate a concise call summary (whisper) for the recruiter/representative.
         This will be played to Subbu before connecting the call.
+        
+        Args:
+            intent: The detected intent (JOB_SEEKER, CLIENT_LEAD, etc.)
+            call_memory: List of conversation exchanges
+            profile_data: The final extracted profile with all entities
         """
-        if not call_memory:
+        profile_data = profile_data or {}
+        
+        print(f"[CALL WHISPER DEBUG] Intent: {intent}")
+        print(f"[CALL WHISPER DEBUG] Profile data received: {profile_data}")
+        print(f"[CALL WHISPER DEBUG] Call memory exchanges: {len(call_memory)}")
+        
+        if not profile_data and not call_memory:
             return "No information collected from the call."
+        
+        # Build extracted details summary from profile - THIS IS THE PRIMARY SOURCE
+        if intent == "JOB_SEEKER" and profile_data:
+            role = profile_data.get("role_interest", "Unknown role")
+            exp = profile_data.get("experience_years", "Unknown experience")
+            tech = profile_data.get("tech_stack", "Unknown tech stack")
+            location = profile_data.get("caller_location", "Unknown location")
+            visa_pref = profile_data.get("visa_sponsorship_preference", "")
+            visa_status = profile_data.get("visa_status", "")
+            relocation = profile_data.get("relocation_willing", "")
+            
+            # Build the summary directly from the data (no LLM hallucination)
+            work_pref = ""
+            if visa_pref:
+                work_pref = f", {visa_pref}"
+            elif visa_status:
+                work_pref = f", {visa_status}"
+            if relocation:
+                work_pref += f", {relocation}"
+            
+            summary = f"Candidate for {role} position. {exp} experience with {tech}. Located in {location}{work_pref}. Profile complete and ready for recruiter review."
+            print(f"[CALL WHISPER] Generated: {summary}")
+            return summary
+        
+        # Fallback for other intents or if profile is incomplete
+        if not call_memory:
+            return "No conversation history available."
         
         # Build a conversation transcript for Claude
         transcript = ""
@@ -293,7 +437,7 @@ class LLMService:
         The summary should:
         1. Be under 20 seconds when spoken (roughly 50 words max)
         2. Include caller's intent/needs
-        3. Include key details (role, experience, tech stack, visa status, etc.) if a JOB_SEEKER
+        3. Include key details (role, years of experience, tech stack, visa status, etc.) if a JOB_SEEKER
         4. Include hiring needs and preferences if CLIENT_LEAD
         5. Be professional and concise and in third person only.
         6. Sound natural when read aloud
