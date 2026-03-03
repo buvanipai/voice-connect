@@ -1,6 +1,7 @@
 # app/services/drive_service.py
 import os
 import io
+import google.auth
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -8,13 +9,15 @@ from googleapiclient.http import MediaIoBaseUpload
 class DriveService:
     def __init__(self):
         self.scopes = ['https://www.googleapis.com/auth/drive.file']
-        self.credentials_file = 'credentials.json'
         self.folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '0AOry37mTRYhKUk9PVA')
 
-        self.credentials = service_account.Credentials.from_service_account_file(
-            self.credentials_file, 
-            scopes=self.scopes
-        )
+        if os.path.exists('credentials.json'):
+            self.credentials = service_account.Credentials.from_service_account_file(
+                'credentials.json',
+                scopes=self.scopes
+            )
+        else:
+            self.credentials, _ = google.auth.default(scopes=self.scopes)
         self.service = build('drive', 'v3', credentials=self.credentials)
 
     async def upload_file(self, file_name: str, file_content: bytes, mime_type: str) -> str:
