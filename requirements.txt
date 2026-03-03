@@ -12,3 +12,4 @@ python-multipart
 beautifulsoup4
 requests
 google-cloud-firestore
+google-cloud-logging
