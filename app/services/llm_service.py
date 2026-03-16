@@ -2,7 +2,7 @@
 import json
 import os
 from pydoc import doc
-from typing import Optional, List
+from typing import Dict, Optional, List
 import chromadb
 import anthropic
 from app.config import settings
@@ -107,8 +107,52 @@ class LLMService:
                 missing.append("relocation_willing")  # Ask "Are you open to relocate?"
         
         return missing
+
+    def _is_missing_value(self, value: Optional[object]) -> bool:
+        return value is None or (isinstance(value, str) and not value.strip())
+
+    def _extract_first_json_object(self, text: str) -> Optional[dict]:
+        """Extract the first valid JSON object from model output."""
+        if not text:
+            return None
+
+        decoder = json.JSONDecoder()
+        start = text.find("{")
+
+        while start != -1:
+            fragment = text[start:]
+            try:
+                parsed, end_index = decoder.raw_decode(fragment)
+                if isinstance(parsed, dict):
+                    trailing = fragment[end_index:].strip()
+                    if trailing:
+                        print(f"⚠️  Claude returned trailing text after JSON: {trailing[:120]}")
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+            start = text.find("{", start + 1)
+
+        return None
+
+    def _check_missing_fields(self, branch: str, profile: dict) -> List[str]:
+        profile = profile or {}
+        normalized_branch = (branch or "GENERAL_INQUIRY").upper()
+
+        if normalized_branch == "JOB_SEEKER":
+            return self._check_job_seeker_missing(profile)
+
+        required_by_branch: Dict[str, List[str]] = {
+            "US_STAFFING": ["hiring_role", "tech_stack", "location_preference", "timeline"],
+            "AI_CAREER_DEV": ["current_background", "ai_goal", "experience_level"],
+            "AI_SMALL_BIZ": ["business_type", "pain_point", "current_tools"],
+            "AI_PROD_DEV": ["product_idea", "target_user", "timeline"],
+        }
+
+        required_fields = required_by_branch.get(normalized_branch, [])
+        return [field for field in required_fields if self._is_missing_value(profile.get(field))]
         
-    async def analyze_call(self, text: str, call_memory: Optional[list] = None, caller_country: str = "Unknown", caller_state: str = "Unknown", user_profile: Optional[dict] = None) -> AIResponse:
+    async def analyze_call(self, text: str, call_memory: Optional[list] = None, caller_country: str = "Unknown", caller_state: str = "Unknown", user_profile: Optional[dict] = None, branch: Optional[str] = None) -> AIResponse:
         
         if call_memory is None:
             call_memory = []
@@ -138,9 +182,24 @@ class LLMService:
         
         print(f"[LLM CONTEXT] Starting profile: {current_profile}")
         print(f"[LLM CONTEXT] Call memory length: {len(call_memory)} exchanges")
+
+        active_branch = (branch or current_profile.get("last_intent") or "GENERAL_INQUIRY").upper()
+        if active_branch == "CLIENT_LEAD":
+            active_branch = "US_STAFFING"
+        supported_branches = {
+            "JOB_SEEKER",
+            "US_STAFFING",
+            "AI_CAREER_DEV",
+            "AI_SMALL_BIZ",
+            "AI_PROD_DEV",
+            "GENERAL_INQUIRY",
+        }
+        if active_branch not in supported_branches:
+            active_branch = "GENERAL_INQUIRY"
+        print(f"[LLM CONTEXT] Active branch: {active_branch}")
         
         # --- DETERMINE WHAT'S MISSING (PYTHON LOGIC) ---
-        missing_fields = self._check_job_seeker_missing(current_profile)
+        missing_fields = self._check_missing_fields(active_branch, current_profile)
         
         # --- LOCATION-BASED JOB MATCH ---
         available_jobs = ", ".join(settings.JOB_LOCATIONS)
@@ -170,7 +229,13 @@ class LLMService:
             known_facts = [
                 f"{k}: {v}" for k, v in current_profile.items() 
                 if v and (isinstance(v, str) and v.strip() or not isinstance(v, str))
-                and k in ['role_interest', 'experience_years', 'visa_status', 'tech_stack', 'caller_location', 'caller_state', 'visa_sponsorship', 'visa_sponsorship_preference', 'relocation_willing']
+                and k in [
+                    'role_interest', 'experience_years', 'visa_status', 'tech_stack', 'caller_location',
+                    'caller_state', 'visa_sponsorship', 'visa_sponsorship_preference', 'relocation_willing',
+                    'hiring_role', 'location_preference', 'timeline', 'current_background', 'ai_goal',
+                    'experience_level', 'business_type', 'pain_point', 'current_tools',
+                    'product_idea', 'target_user', 'budget_range'
+                ]
             ]
             if known_facts:
                 user_context = f"KNOWN PROFILE DATA: {', '.join(known_facts)}. DO NOT ASK FOR THESE."
@@ -181,8 +246,30 @@ class LLMService:
             missing_fields_str = ", ".join(missing_fields)
             missing_fields_instruction = f"\nCRITICAL: You MUST focus on collecting these MISSING fields from the user:\n{missing_fields_str}\n\nDO NOT ask about any other fields. DO NOT extract fields that the user has not explicitly provided."
 
-        # --- THE OPTIMIZED SYSTEM PROMPT (NEW CONVERSATIONAL FLOW) ---
-        system_prompt = f"""
+        # --- BRANCH-SPECIFIC SYSTEM PROMPTS ---
+        common_json_contract = """
+        CRITICAL INSTRUCTION ON MEMORY & STATE:
+        You will see your past responses in the chat history as JSON objects.
+        CHECK the "entities" field in those past JSON objects.
+        - Silently cross off the details the user has ALREADY provided.
+        - ONLY ask questions about the details that are STILL MISSING.
+        - DO NOT EVER repeat a question if the user already answered it.
+
+        STATE CARRY-OVER RULE:
+        You must OUTPUT the cumulative list of all entities collected so far.
+
+        INTERACTION STYLE:
+        - Keep responses to 1-2 short sentences maximum.
+        - Ask ONE question at a time.
+
+        MANDATORY JSON OUTPUT FORMAT:
+        Your response MUST ALWAYS be ONLY a valid JSON object.
+        Required fields: intent, confidence, entities, reply_text, action, branch.
+        Example:
+        {{"intent": "US_STAFFING", "confidence": 0.95, "entities": {{"hiring_role": "Backend Engineer"}}, "reply_text": "Thanks. What tech stack do you need?", "action": "speak", "branch": "US_STAFFING"}}
+        """
+
+        job_seeker_prompt = f"""
         You are the Voice AI Receptionist for Bhuvi IT Solutions.
         
         CONTEXT:
@@ -241,7 +328,7 @@ class LLMService:
            - After confirming all details are collected, set "action": "forward" immediately.
            - DO NOT ask for email, phone, name, or personal contact info under any circumstances.
 
-        2. CLIENT_LEAD (Company looking to hire talent or build products)
+        2. US_STAFFING (Company looking to hire talent or build products)
            - GOAL: Collect 3 details: Roles they are hiring for, Tech stack needed, Preference for nearshore vs US-based.
            - Once all 3 are collected, set "action": "forward".
 
@@ -293,9 +380,90 @@ class LLMService:
         ❌ {{"entities": null}} (null values in entities - extract actual values from user input)
         
         If user input is unclear, still respond with JSON. For example:
-        {{"intent": "JOB_SEEKER", "confidence": 0.5, "entities": {{}}, "reply_text": "I didn't catch that. Could you please repeat?", "action": "speak"}}
-        
+        {{"intent": "JOB_SEEKER", "confidence": 0.5, "entities": {{}}, "reply_text": "I didn't catch that. Could you please repeat?", "action": "speak", "branch": "JOB_SEEKER"}}
         """
+
+        prompt_map = {
+            "JOB_SEEKER": job_seeker_prompt,
+            "US_STAFFING": f"""
+        You are the Voice AI Receptionist for Bhuvi IT Solutions handling US staffing calls only.
+
+        CONTEXT:
+        {user_context}
+        {missing_fields_instruction}
+
+        GOAL:
+        Collect exactly these fields: hiring_role, tech_stack, location_preference (US-based or nearshore LatAm), timeline.
+        Forward only when all 4 required fields are collected.
+        When all required fields are collected, reply that you are connecting them to a staffing specialist and set action to "forward".
+        Do not ask for contact info.
+        Always set intent and branch to "US_STAFFING".
+
+        {common_json_contract}
+            """,
+            "AI_CAREER_DEV": f"""
+        You are the Voice AI Receptionist for Bhuvi IT Solutions handling AI career development calls only.
+
+        CONTEXT:
+        {user_context}
+        {missing_fields_instruction}
+
+        GOAL:
+        Collect exactly these fields: current_background, ai_goal, experience_level.
+        Forward only when all 3 required fields are collected.
+        When all required fields are collected, reply that you are connecting them to a specialist and set action to "forward".
+        Always set intent and branch to "AI_CAREER_DEV".
+
+        {common_json_contract}
+            """,
+            "AI_SMALL_BIZ": f"""
+        You are the Voice AI Receptionist for Bhuvi IT Solutions handling AI for small business calls only.
+
+        CONTEXT:
+        {user_context}
+        {missing_fields_instruction}
+
+        GOAL:
+        Collect exactly these fields: business_type, pain_point, current_tools.
+        Forward only when all 3 required fields are collected.
+        When all required fields are collected, reply that you are connecting them to a specialist and set action to "forward".
+        Always set intent and branch to "AI_SMALL_BIZ".
+
+        {common_json_contract}
+            """,
+            "AI_PROD_DEV": f"""
+        You are the Voice AI Receptionist for Bhuvi IT Solutions handling AI product development calls only.
+
+        CONTEXT:
+        {user_context}
+        {missing_fields_instruction}
+
+        GOAL:
+        Collect exactly these fields: product_idea, target_user, timeline.
+        budget_range is optional and must not gate forwarding.
+        Forward only when product_idea, target_user, and timeline are all collected.
+        When required fields are collected, reply that you are connecting them to a specialist and set action to "forward".
+        Always set intent and branch to "AI_PROD_DEV".
+
+        {common_json_contract}
+            """,
+            "GENERAL_INQUIRY": f"""
+        You are the Voice AI Receptionist for Bhuvi IT Solutions handling general inquiries only.
+
+        KNOWLEDGE BASE:
+        {retrieved_knowledge}
+
+        RULES:
+        - Answer using only the knowledge base.
+        - Keep action as "speak" unless the caller explicitly asks for a human.
+        - If caller explicitly asks for a human representative, set action to "forward".
+        - Always set intent and branch to "GENERAL_INQUIRY".
+
+        {common_json_contract}
+            """,
+        }
+
+        system_prompt = prompt_map.get(active_branch, prompt_map["GENERAL_INQUIRY"])
 
         # --- REBUILD CHAT HISTORY WITH ENTITIES ---
         chat_messages = []
@@ -311,7 +479,8 @@ class LLMService:
                 saved_entities = exchange.get("entities", {}) 
                 entities_json = json.dumps(saved_entities)
                 
-                fake_json = f'{{"intent": "{saved_intent}", "confidence": 0.9, "entities": {entities_json}, "reply_text": "{safe_ai_text}", "action": "speak"}}'
+                saved_branch = exchange.get("branch", saved_intent)
+                fake_json = f'{{"intent": "{saved_intent}", "confidence": 0.9, "entities": {entities_json}, "reply_text": "{safe_ai_text}", "action": "speak", "branch": "{saved_branch}"}}'
                 chat_messages.append({"role": "assistant", "content": fake_json})
         
         chat_messages.append({"role": "user", "content": text})
@@ -340,17 +509,25 @@ class LLMService:
                 raw_content = "\n".join(lines[1:-1]) if len(lines) > 2 else raw_content
                 raw_content = raw_content.replace("```json", "").replace("```", "").strip()
             
-            # Extract JSON from response (handles text preambles like "Alright, here's...")
-            # Find first { and parse from there
-            json_start = raw_content.find('{')
-            if json_start != -1:
-                raw_content = raw_content[json_start:]
-            
             print(f"Claude Response: {raw_content[:200]}...")  # Debug: show first 200 chars
             
-            raw_content = raw_content.replace("\n", " ").replace("\r", " ")
-            data = json.loads(raw_content)
+            normalized_content = raw_content.replace("\n", " ").replace("\r", " ").strip()
+            data = self._extract_first_json_object(normalized_content)
+            if data is None:
+                # Claude returned text with no parseable JSON object — wrap it gracefully
+                print(f"⚠️  Claude returned non-parseable JSON. Wrapping as {active_branch} speak turn.")
+                return AIResponse(
+                    intent=active_branch,
+                    confidence=0.5,
+                    reply_text=raw_content,
+                    action="speak",
+                    entities={},
+                    branch=active_branch
+                )
+
             response = AIResponse(**data)
+            if not response.branch:
+                response.branch = active_branch
             
             print(f"LLM Intent: {response.intent}")
             print(f"LLM Entities Extracted: {response.entities}")
@@ -386,7 +563,7 @@ class LLMService:
         This will be played to Subbu before connecting the call.
         
         Args:
-            intent: The detected intent (JOB_SEEKER, CLIENT_LEAD, etc.)
+            intent: The detected intent (JOB_SEEKER, US_STAFFING, etc.)
             call_memory: List of conversation exchanges
             profile_data: The final extracted profile with all entities
         """
@@ -438,7 +615,7 @@ class LLMService:
         1. Be under 20 seconds when spoken (roughly 50 words max)
         2. Include caller's intent/needs
         3. Include key details (role, years of experience, tech stack, visa status, etc.) if a JOB_SEEKER
-        4. Include hiring needs and preferences if CLIENT_LEAD
+        4. Include hiring needs and preferences if US_STAFFING
         5. Be professional and concise and in third person only.
         6. Sound natural when read aloud
         

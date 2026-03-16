@@ -74,7 +74,7 @@ class ProfileService:
         
         Args:
             phone_number: Caller's phone
-            intent: The intent name (JOB_SEEKER, CLIENT_LEAD, etc.)
+            intent: The intent name (JOB_SEEKER, US_STAFFING, etc.)
             entities: Entity dict to save under intents[intent]
             shared_data: Optional dict of shared metadata (last_intent, last_interaction, etc.)
         """

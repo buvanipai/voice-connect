@@ -130,9 +130,17 @@ class MetricsService:
                 "caller_location", "caller_state", "visa_status", 
                 "visa_sponsorship", "relocation_willing"
             ],
-            "CLIENT_LEAD": [
-                "company_name", "roles_hiring", "tech_stack", 
-                "nearshore_preference", "hiring_timeline"
+            "US_STAFFING": [
+                "hiring_role", "tech_stack", "location_preference", "timeline"
+            ],
+            "AI_CAREER_DEV": [
+                "current_background", "ai_goal", "experience_level"
+            ],
+            "AI_SMALL_BIZ": [
+                "business_type", "pain_point", "current_tools"
+            ],
+            "AI_PROD_DEV": [
+                "product_idea", "target_user", "timeline"
             ]
         }
         

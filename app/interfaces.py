@@ -1,6 +1,7 @@
 # app/interfaces.py
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
+from app.schemas import AIResponse
 
 class STTProvider(ABC):
     """
@@ -26,5 +27,13 @@ class LLMProvider(ABC):
     Any service that processes Text and generates Text must follow this rule.
     """
     @abstractmethod
-    async def analyze_call(self, text: str) -> str:
+    async def analyze_call(
+        self,
+        text: str,
+        call_memory: Optional[list] = None,
+        caller_country: str = "Unknown",
+        caller_state: str = "Unknown",
+        user_profile: Optional[dict] = None,
+        branch: Optional[str] = None,
+    ) -> AIResponse:
         pass

@@ -2,6 +2,8 @@
 import os
 import datetime
 import select
+import asyncio
+import time
 from dotenv import load_dotenv
 from requests import get
 import twilio
@@ -10,7 +12,7 @@ import logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 from pydoc import text
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, HTTPException
 from app.schemas import CallPayload, AIResponse
 from app.services.llm_service import LLMService
@@ -22,6 +24,7 @@ from app.services.cloud_logging_service import CloudLoggingService
 from twilio.rest import Client
 from contextlib import asynccontextmanager
 from fastapi.responses import HTMLResponse
+from xml.sax.saxutils import escape as xml_escape
 
 app = FastAPI(title="VoiceConnect API", version="0.1.0")
 
@@ -30,8 +33,28 @@ _stt_instance = None
 _drive_service_instance = None
 _metrics_instance = None
 _cloud_logging_instance = None
-# Store conversation history per call session (CallSid)
-call_sessions: Dict[str, List[dict]] = {}
+# Store per-call state (conversation memory + active branch)
+call_sessions: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_or_init_session(call_sid: str) -> Dict[str, Any]:
+    if call_sid not in call_sessions:
+        call_sessions[call_sid] = {
+            "memory": [],
+            "branch": None,
+        }
+    return call_sessions[call_sid]
+
+
+def _build_record_response(message: str) -> Response:
+    safe_message = xml_escape(message)
+    xml_response = f"""
+        <Response>
+            <Say voice="Polly.Joanna-Neural">{safe_message}</Say>
+            <Record maxLength="30" timeout="2" trim="trim-silence" action="/transcribe" playBeep="true"/>
+        </Response>
+        """
+    return Response(content=xml_response, media_type="application/xml")
 
 # Initialize Service
 def get_llm_service():
@@ -80,6 +103,30 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="VoiceConnect API", version="0.1.0", lifespan=lifespan)
 
+
+def _main_menu_response() -> Response:
+    xml_response = """
+        <Response>
+            <Gather input="dtmf" action="/menu-select" numDigits="1" timeout="7">
+                <Say voice="Polly.Joanna-Neural">Hi, thank you for calling Bhuvi IT Solutions! Press 1 if you are a Job Seeker. Press 2 for Staffing Services. Press 0 to hear these options again.</Say>
+            </Gather>
+            <Redirect method="POST">/voice</Redirect>
+        </Response>
+        """
+    return Response(content=xml_response, media_type="application/xml")
+
+
+def _staffing_submenu_response() -> Response:
+    xml_response = """
+        <Response>
+            <Gather input="dtmf" action="/submenu-select" numDigits="1" timeout="7">
+                <Say voice="Polly.Joanna-Neural">Press 1 for US Staffing. Press 2 for AI Career Development. Press 3 for AI for Small Business. Press 4 for AI Product Development. Press 0 to hear these options again.</Say>
+            </Gather>
+            <Redirect method="POST">/submenu-select</Redirect>
+        </Response>
+        """
+    return Response(content=xml_response, media_type="application/xml")
+
 @app.get("/")
 def home():
     return {"message": "Welcome to the VoiceConnect API!",
@@ -110,61 +157,82 @@ async def voice_webhook(request: Request):
     call_sid = str(form_data.get("CallSid", "unknown"))
     caller_number = str(form_data.get("From", "unknown"))
     
-    # Initialize conversation history for this call
-    if call_sid not in call_sessions:
-        call_sessions[call_sid] = []
-        print(f"[NEW CALL] CallSid: {call_sid}")
+    session = _get_or_init_session(call_sid)
+    call_memory = session["memory"]
+    print(f"[NEW/ACTIVE CALL] CallSid: {call_sid}")
     
     # Check if this is a returning caller
     profile_service = ProfileService()
     profile_data = profile_service.get_profile(caller_number)
     print(f"[PROFILE DEBUG] Caller: {caller_number}, Profile data: {profile_data}")
     
-    # Personalized greeting for returning callers
-    if profile_data and profile_data.get("last_intent") == "JOB_SEEKER":
-        # Use conversational fallbacks instead of "unknown"
-        role = profile_data.get('role_interest', 'an open position')
-        exp = profile_data.get('experience_years', 'some')
-        skills = profile_data.get('tech_stack', 'your technical skills')
-        location = profile_data.get('caller_location', 'your location')
-        greeting = f"Welcome back! I have your profile for the {role} role, {exp} years in {skills}, based in {location}. Is this still accurate, or do you need to update anything?"
-        print(f"[RETURNING JOB_SEEKER] {caller_number}")
-        print(f"[GREETING] {greeting}")
-        
-        # Store greeting in call memory so Claude has context for the response
-        call_sessions[call_sid].append({
+    known_branch = profile_data.get("last_intent") if profile_data else None
+    if known_branch == "CLIENT_LEAD":
+        known_branch = "US_STAFFING"
+    if known_branch:
+        session["branch"] = known_branch
+        personalized = "Welcome back! Thanks for calling Bhuvi IT Solutions again. Please share any updates after the beep."
+        call_memory.append({
             "user": "[SYSTEM: Returning caller]",
-            "ai": greeting,
-            "intent": "JOB_SEEKER",
-            "entities": profile_data
+            "ai": personalized,
+            "intent": known_branch,
+            "branch": known_branch,
+            "entities": profile_data or {}
         })
-    elif profile_data and profile_data.get("last_intent") == "CLIENT_LEAD":
-        greeting = "Welcome back to Bhuvi IT Solutions! How can I help with your hiring needs today?"
-        print(f"[RETURNING CLIENT_LEAD] {caller_number}")
-        print(f"[GREETING] {greeting}")
-        
-        # Store greeting in call memory
-        call_sessions[call_sid].append({
-            "user": "[SYSTEM: Returning caller]",
-            "ai": greeting,
-            "intent": "CLIENT_LEAD",
-            "entities": profile_data
-        })
-    else:
-        # New caller - use generic greeting
-        greeting = "Hello! Thank you for calling Bhuvi IT Solutions. Are you calling to apply for a job, looking to hire IT talent, or interested in AI development?"
-        print(f"[NEW CALLER] {caller_number}")
-        print(f"[GREETING] {greeting}")
-    
-    # Simple XML response (TwiML)
-    xml_response = f"""
-        <Response>
-            <Say voice="Polly.Joanna-Neural">{greeting}</Say>
-            <Record maxLength="10" timeout="2" trim="trim-silence" action="/transcribe" playBeep="false"/>
-        </Response>
-        """
-    # Return as XML so Twilio understands it
-    return Response(content=xml_response, media_type="application/xml")
+        print(f"[RETURNING CALLER] {caller_number} -> branch={known_branch}")
+        return _build_record_response(personalized)
+
+    print(f"[NEW CALLER] {caller_number}")
+    return _main_menu_response()
+
+
+@app.post("/menu-select")
+async def menu_select(request: Request):
+    form_data = await request.form()
+    call_sid = str(form_data.get("CallSid", "unknown"))
+    digit = str(form_data.get("Digits", "")).strip()
+    session = _get_or_init_session(call_sid)
+
+    if digit == "1":
+        session["branch"] = "JOB_SEEKER"
+        message = "Great! Please tell us about the role you're looking for after the beep."
+        return _build_record_response(message)
+
+    if digit == "0":
+        return _main_menu_response()
+
+    if digit == "2":
+        return _staffing_submenu_response()
+
+    return _main_menu_response()
+
+
+@app.post("/submenu-select")
+async def submenu_select(request: Request):
+    form_data = await request.form()
+    call_sid = str(form_data.get("CallSid", "unknown"))
+    digit = str(form_data.get("Digits", "")).strip()
+    session = _get_or_init_session(call_sid)
+
+    branch_map = {
+        "1": "US_STAFFING",
+        "2": "AI_CAREER_DEV",
+        "3": "AI_SMALL_BIZ",
+        "4": "AI_PROD_DEV",
+    }
+    opening_lines = {
+        "US_STAFFING": "Please describe the role or talent you're looking for.",
+        "AI_CAREER_DEV": "Tell us about your background and what you're hoping to achieve with AI.",
+        "AI_SMALL_BIZ": "Tell us about your business and what problem you'd like AI to solve.",
+        "AI_PROD_DEV": "Tell us about the AI product you want to build.",
+    }
+
+    selected_branch = branch_map.get(digit)
+    if not selected_branch:
+        return _staffing_submenu_response()
+
+    session["branch"] = selected_branch
+    return _build_record_response(opening_lines[selected_branch])
 
 @app.post("/transcribe")
 async def transcribe_webhook(request: Request):
@@ -180,11 +248,13 @@ async def transcribe_webhook(request: Request):
     caller_state = str(form_data.get("CallerState", "unknown"))
     print(f"[{call_sid}] DEBUG: Twilio reports CallerState as: '{caller_state}'")
     caller_number = str(form_data.get("From", "unknown"))
+    session_exists = call_sid in call_sessions
+    session = _get_or_init_session(call_sid)
     
     # Initialize metrics and cloud logging for this call
     metrics = get_metrics_service()
     cloud_logger = get_cloud_logging_service()
-    if call_sid not in call_sessions:
+    if not session_exists:
         metrics.start_call(call_sid, caller_number)
         cloud_logger.log_call_event({
             "call_sid": call_sid,
@@ -198,20 +268,32 @@ async def transcribe_webhook(request: Request):
         metrics.record_stt_attempt(call_sid, success=False, text="")
         return Response(content="<Response><Say>I didn't hear anything.</Say></Response>", media_type="application/xml")
     
+    # Twilio times out webhook fetches at ~15s. Keep a safety buffer.
+    endpoint_start = time.monotonic()
+    endpoint_deadline = endpoint_start + 13.5
+
     # Deepgram to convert audio to text
     stt = get_stt_service()
     
     print(f"[{call_sid}] Sending URL to Deepgram: {recording_url}") # Let's verify the URL exists
     
-    import time
     stt_start = time.time()
     try:
-        text = await stt.transcribe(recording_url)
+        stt_timeout_s = max(2.0, min(6.0, endpoint_deadline - time.monotonic() - 6.0))
+        text = await asyncio.wait_for(stt.transcribe(recording_url), timeout=stt_timeout_s)
         stt_duration_ms = (time.time() - stt_start) * 1000
         print(f"[{call_sid}] RAW DEEPGRAM TEXT: '{text}'")
         metrics.record_stt_attempt(call_sid, success=True, text=text)
         metrics.record_latency("stt_transcribe", stt_duration_ms)
         cloud_logger.log_stt_metric(call_sid, success=True, text=text, duration_ms=stt_duration_ms)
+    except asyncio.TimeoutError:
+        stt_duration_ms = (time.time() - stt_start) * 1000
+        print(f"[{call_sid}] STT timeout at {stt_duration_ms:.0f}ms. Returning fast retry prompt.")
+        metrics.record_error(call_sid, "STT_TIMEOUT", f"Timed out after {stt_duration_ms:.0f}ms")
+        metrics.record_stt_attempt(call_sid, success=False)
+        metrics.record_latency("stt_transcribe", stt_duration_ms)
+        cloud_logger.log_error_event(call_sid, "STT_TIMEOUT", "Deepgram transcription timed out", {"duration_ms": stt_duration_ms})
+        return _build_record_response("I had trouble hearing that in time. Please repeat after the beep.")
     except Exception as e:
         stt_duration_ms = (time.time() - stt_start) * 1000
         print(f"[{call_sid}] DEEPGRAM CRASHED: {str(e)}")
@@ -231,7 +313,8 @@ async def transcribe_webhook(request: Request):
         )
     
     # Get conversation history for this call
-    call_memory = call_sessions.get(call_sid, [])
+    call_memory = session["memory"]
+    active_branch: Optional[str] = session.get("branch")
     profile_service = ProfileService()
     profile_data = profile_service.get_profile(caller_number) or {}
     
@@ -239,13 +322,26 @@ async def transcribe_webhook(request: Request):
     
     service = get_llm_service()
     llm_start = time.time()
-    ai_response_obj = await service.analyze_call(
-        text, 
-        call_memory=call_memory, 
-        caller_country=caller_country, 
-        caller_state=caller_state,
-        user_profile=profile_data
-    )
+    llm_timeout_s = max(2.0, endpoint_deadline - time.monotonic() - 1.0)
+    try:
+        ai_response_obj = await asyncio.wait_for(
+            service.analyze_call(
+                text,
+                call_memory=call_memory,
+                caller_country=caller_country,
+                caller_state=caller_state,
+                user_profile=profile_data,
+                branch=active_branch
+            ),
+            timeout=llm_timeout_s
+        )
+    except asyncio.TimeoutError:
+        elapsed_ms = (time.monotonic() - endpoint_start) * 1000
+        print(f"[{call_sid}] LLM timeout after {elapsed_ms:.0f}ms. Returning fast retry prompt before Twilio limit.")
+        metrics.record_error(call_sid, "LLM_TIMEOUT", f"Timed out after {elapsed_ms:.0f}ms")
+        cloud_logger.log_error_event(call_sid, "LLM_TIMEOUT", "LLM analysis timed out", {"elapsed_ms": elapsed_ms})
+        return _build_record_response("Thanks. One moment please. Could you repeat that after the beep?")
+
     llm_duration_ms = (time.time() - llm_start) * 1000
     metrics.record_latency("llm_analyze", llm_duration_ms)
     
@@ -259,7 +355,7 @@ async def transcribe_webhook(request: Request):
     )
     
     # Log to cloud
-    cloud_logger.log_turn_event(call_sid, len(call_sessions.get(call_sid, [])) + 1, {
+    cloud_logger.log_turn_event(call_sid, len(call_memory) + 1, {
         "user_text": text,
         "intent": ai_response_obj.intent,
         "confidence": ai_response_obj.confidence,
@@ -322,15 +418,20 @@ async def transcribe_webhook(request: Request):
     
     # Record metrics: action and completion
     metrics.record_action(call_sid, action)
+    resolved_branch = ai_response_obj.branch or active_branch or ai_response_obj.intent
+    session["branch"] = resolved_branch
+
     call_memory.append({
         "user": text,
         "ai": ai_text,
         "intent": ai_response_obj.intent,
+        "branch": resolved_branch,
         "entities": ai_response_obj.entities
     })
-    call_sessions[call_sid] = call_memory
     
+    elapsed_ms = (time.monotonic() - endpoint_start) * 1000
     print(f"[{call_sid}] AI response: {ai_text}")
+    print(f"[{call_sid}] Action decision: {action}, Intent: {ai_response_obj.intent}, /transcribe elapsed: {elapsed_ms:.0f}ms")
     print(f"[{call_sid}] Conversation history length: {len(call_memory)}")
     
     VOICE_MAP = {
@@ -349,6 +450,8 @@ async def transcribe_webhook(request: Request):
             selected_language = settings["language"]
             clean_text = ai_text.replace(tag, "").strip()
             break
+
+    clean_text = xml_escape(clean_text)
     
     # Check if we should forward the call
     if action == "forward" or ai_response_obj.intent == "ERROR":
@@ -381,6 +484,7 @@ async def transcribe_webhook(request: Request):
             profile_data=updated_data  # Pass the final profile with all extracted details
         )
         
+        call_whisper = xml_escape(call_whisper)
         print(f"[{call_sid}] Call Whisper: {call_whisper}")
         
         # Clean up session when forwarding
@@ -403,7 +507,7 @@ async def transcribe_webhook(request: Request):
         <Response>
             <Say voice="Polly.Joanna-Neural">{clean_text}</Say>
             <Pause length="2"/>
-            <Record maxLength="30" timeout="2" trim="trim-silence" action="/transcribe" playBeep="false"/>
+            <Record maxLength="30" timeout="2" trim="trim-silence" action="/transcribe" playBeep="true"/>
         </Response>
         """
     
@@ -425,7 +529,7 @@ async def call_status_webhook(request: Request):
     # Clean up session when call ends
     if call_status in ["completed", "failed", "busy", "no-answer"]:
         if call_sid in call_sessions:
-            conversation_length = len(call_sessions[call_sid])
+            conversation_length = len(call_sessions[call_sid].get("memory", []))
             print(f"[{call_sid}] Cleaning up session. Had {conversation_length} exchanges.")
             del call_sessions[call_sid]
     

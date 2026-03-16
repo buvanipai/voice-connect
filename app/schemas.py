@@ -8,8 +8,9 @@ class CallPayload(BaseModel):
     language: str = Field("en", description="Detected language (en, hi, ta)")
 
 class AIResponse(BaseModel):
-    intent: str = Field(default="GENERAL_INQUIRY", description="Detected intent (JOB_SEEKER, CLIENT, etc.)")
+    intent: str = Field(default="GENERAL_INQUIRY", description="Detected intent (JOB_SEEKER, US_STAFFING, AI_CAREER_DEV, AI_SMALL_BIZ, AI_PROD_DEV, GENERAL_INQUIRY)")
     confidence: float = Field(default=0.0, description="0.0 to 1.0 score")
     entities: Dict[str, Any] = Field(default_factory=dict, description="Key extracted entities (role, experience, visa, etc.)")
     reply_text: str = Field(..., description="What the AI voice should say back")
     action: str = "speak"
+    branch: Optional[str] = None
