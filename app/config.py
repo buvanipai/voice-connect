@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     MODEL_NAME: str = "claude-3-haiku-20240307"
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
+    SENDGRID_API_KEY: str = ""
+    SENDGRID_FROM_EMAIL: str = ""
     
     # Available job locations (sourced from knowledge base)
     # Used for location matching logic

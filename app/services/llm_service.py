@@ -105,6 +105,17 @@ class LLMService:
             relocation_willing = profile.get("relocation_willing")
             if not relocation_willing or (isinstance(relocation_willing, str) and not relocation_willing.strip()):
                 missing.append("relocation_willing")  # Ask "Are you open to relocate?"
+
+        # FINAL STEP: Contact preference before forwarding
+        contact_preference = profile.get("contact_preference")
+        if not contact_preference or (isinstance(contact_preference, str) and not contact_preference.strip()):
+            missing.append("contact_preference")
+            return missing
+
+        if isinstance(contact_preference, str) and contact_preference.strip().lower() == "email":
+            email_address = profile.get("email_address")
+            if not email_address or (isinstance(email_address, str) and not email_address.strip()):
+                missing.append("email_address")
         
         return missing
 
@@ -143,14 +154,21 @@ class LLMService:
             return self._check_job_seeker_missing(profile)
 
         required_by_branch: Dict[str, List[str]] = {
-            "US_STAFFING": ["hiring_role", "tech_stack", "location_preference", "timeline"],
-            "AI_CAREER_DEV": ["current_background", "ai_goal", "experience_level"],
-            "AI_SMALL_BIZ": ["business_type", "pain_point", "current_tools"],
-            "AI_PROD_DEV": ["product_idea", "target_user", "timeline"],
+            "US_STAFFING": ["hiring_role", "tech_stack", "location_preference", "timeline", "contact_preference"],
+            "AI_CAREER_DEV": ["current_background", "ai_goal", "experience_level", "contact_preference"],
+            "AI_SMALL_BIZ": ["business_type", "pain_point", "current_tools", "contact_preference"],
+            "AI_PROD_DEV": ["product_idea", "target_user", "timeline", "contact_preference"],
         }
 
         required_fields = required_by_branch.get(normalized_branch, [])
-        return [field for field in required_fields if self._is_missing_value(profile.get(field))]
+        missing = [field for field in required_fields if self._is_missing_value(profile.get(field))]
+
+        contact_preference = profile.get("contact_preference")
+        if isinstance(contact_preference, str) and contact_preference.strip().lower() == "email":
+            if self._is_missing_value(profile.get("email_address")):
+                missing.append("email_address")
+
+        return missing
         
     async def analyze_call(self, text: str, call_memory: Optional[list] = None, caller_country: str = "Unknown", caller_state: str = "Unknown", user_profile: Optional[dict] = None, branch: Optional[str] = None) -> AIResponse:
         
@@ -234,7 +252,7 @@ class LLMService:
                     'caller_state', 'visa_sponsorship', 'visa_sponsorship_preference', 'relocation_willing',
                     'hiring_role', 'location_preference', 'timeline', 'current_background', 'ai_goal',
                     'experience_level', 'business_type', 'pain_point', 'current_tools',
-                    'product_idea', 'target_user', 'budget_range'
+                    'product_idea', 'target_user', 'budget_range', 'contact_preference', 'email_address'
                 ]
             ]
             if known_facts:
@@ -322,11 +340,16 @@ class LLMService:
            STEP 4: Relocation Check (only if their location doesn't match job locations)
            - Ask: "Our jobs are located in {available_jobs}. Are you willing to relocate if your location doesn't match?"
            - Extract: relocation_willing (e.g., "Yes", "No", "Maybe")
+
+              STEP 5: Contact Preference (MANDATORY before forwarding)
+              - Ask: "Would you prefer follow-up via WhatsApp or email?"
+              - Extract: contact_preference as "whatsapp" or "email"
+              - If contact_preference is "email", ask: "Please say your email address slowly and clearly."
+              - Extract: email_address
            
            - CRITICAL: Once all required details are collected, you MUST say: "I am sending a text message with a link for you to upload your resume and connecting you with our recruiter for the next steps."
-           - NEVER ask for email address, phone number, or any other contact information. The system handles everything via SMS.
-           - After confirming all details are collected, set "action": "forward" immediately.
-           - DO NOT ask for email, phone, name, or personal contact info under any circumstances.
+              - Do NOT set "action": "forward" until contact_preference is collected.
+              - If contact_preference is "email", do NOT set "action": "forward" until email_address is also collected.
 
         2. US_STAFFING (Company looking to hire talent or build products)
            - GOAL: Collect 3 details: Roles they are hiring for, Tech stack needed, Preference for nearshore vs US-based.
@@ -347,6 +370,8 @@ class LLMService:
         - "visa_sponsorship": (US ONLY) Do they need sponsorship? (e.g., "Yes", "No", "Already have visa")
         - "visa_sponsorship_preference": (INTERNATIONAL ONLY) Their preference (e.g., "Nearshore remote", "US visa sponsorship", "Both")
         - "relocation_willing": (CONDITIONAL) Only if their location doesn't match job locations (e.g., "Yes", "No", "Open to it")
+        - "contact_preference": Preferred follow-up channel ("whatsapp" or "email")
+        - "email_address": Caller email if contact_preference is "email"
         
         CRITICAL INSTRUCTION ON MEMORY & STATE (APPLIES TO ALL INTENTS):
         You will see your past responses in the chat history as JSON objects.
@@ -394,9 +419,11 @@ class LLMService:
 
         GOAL:
         Collect exactly these fields: hiring_role, tech_stack, location_preference (US-based or nearshore LatAm), timeline.
-        Forward only when all 4 required fields are collected.
+        As the last step before forwarding, ask: "Would you prefer follow-up via WhatsApp or email?"
+        Extract contact_preference as "whatsapp" or "email".
+        If contact_preference is "email", ask: "Please say your email address slowly and clearly." and extract email_address.
+        Forward only when all required fields are collected, plus contact_preference, and email_address when email is chosen.
         When all required fields are collected, reply that you are connecting them to a staffing specialist and set action to "forward".
-        Do not ask for contact info.
         Always set intent and branch to "US_STAFFING".
 
         {common_json_contract}
@@ -410,7 +437,10 @@ class LLMService:
 
         GOAL:
         Collect exactly these fields: current_background, ai_goal, experience_level.
-        Forward only when all 3 required fields are collected.
+        As the last step before forwarding, ask: "Would you prefer follow-up via WhatsApp or email?"
+        Extract contact_preference as "whatsapp" or "email".
+        If contact_preference is "email", ask: "Please say your email address slowly and clearly." and extract email_address.
+        Forward only when all 3 required fields are collected, plus contact_preference, and email_address when email is chosen.
         When all required fields are collected, reply that you are connecting them to a specialist and set action to "forward".
         Always set intent and branch to "AI_CAREER_DEV".
 
@@ -425,7 +455,10 @@ class LLMService:
 
         GOAL:
         Collect exactly these fields: business_type, pain_point, current_tools.
-        Forward only when all 3 required fields are collected.
+        As the last step before forwarding, ask: "Would you prefer follow-up via WhatsApp or email?"
+        Extract contact_preference as "whatsapp" or "email".
+        If contact_preference is "email", ask: "Please say your email address slowly and clearly." and extract email_address.
+        Forward only when all 3 required fields are collected, plus contact_preference, and email_address when email is chosen.
         When all required fields are collected, reply that you are connecting them to a specialist and set action to "forward".
         Always set intent and branch to "AI_SMALL_BIZ".
 
@@ -441,7 +474,10 @@ class LLMService:
         GOAL:
         Collect exactly these fields: product_idea, target_user, timeline.
         budget_range is optional and must not gate forwarding.
-        Forward only when product_idea, target_user, and timeline are all collected.
+        As the last step before forwarding, ask: "Would you prefer follow-up via WhatsApp or email?"
+        Extract contact_preference as "whatsapp" or "email".
+        If contact_preference is "email", ask: "Please say your email address slowly and clearly." and extract email_address.
+        Forward only when product_idea, target_user, timeline, and contact_preference are collected, and email_address when email is chosen.
         When required fields are collected, reply that you are connecting them to a specialist and set action to "forward".
         Always set intent and branch to "AI_PROD_DEV".
 
