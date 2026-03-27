@@ -617,7 +617,8 @@ async def transcribe_webhook(request: Request):
             contact_preference = _non_empty_str(session_profile.get("contact_preference"))
         if not contact_preference:
             contact_preference = _get_profile_value(profile_data, "contact_preference")
-        contact_preference = (contact_preference or "whatsapp").lower()
+        if contact_preference:
+            contact_preference = contact_preference.lower()
 
         email_address = _non_empty_str(ai_response_obj.entities.get("email_address") if ai_response_obj.entities else None)
         if not email_address:
@@ -625,6 +626,25 @@ async def transcribe_webhook(request: Request):
         if not email_address:
             email_address = _get_profile_value(profile_data, "email_address")
         
+        # Guardrail for JOB_SEEKER: do not forward until contact preference (and email when needed) is captured.
+        if ai_response_obj.intent == "JOB_SEEKER" and action == "forward":
+            if contact_preference not in {"whatsapp", "email"}:
+                print(f"[{call_sid}] Guardrail blocked JOB_SEEKER forward: missing/invalid contact_preference={contact_preference}")
+                return _build_record_response("Before I connect you, would you prefer follow-up by WhatsApp or email?")
+
+            if contact_preference == "email" and not email_address:
+                print(f"[{call_sid}] Guardrail blocked JOB_SEEKER forward: email preference chosen but email_address missing")
+                confirm_url = (
+                    f"/confirm-email?call_sid={quote_plus(call_sid)}"
+                    f"&caller_number={quote_plus(caller_number)}"
+                )
+                xml_response = f"""
+                    <Response>
+                        <Redirect method="POST">{confirm_url}</Redirect>
+                    </Response>
+                    """
+                return Response(content=xml_response, media_type="application/xml")
+
         # WhatsApp Logic for JOB_SEEKER - send resume upload link
         if ai_response_obj.intent == "JOB_SEEKER":
             if contact_preference == "email":
