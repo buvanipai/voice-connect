@@ -1,7 +1,9 @@
+# services/profile_services.py
 import logging
 from typing import Optional, Dict, Any, cast
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_document import DocumentSnapshot
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ class ProfileService:
     def __init__(self):
         self.db = get_firestore_client()
         if self.db:
-            self.collection = self.db.collection("caller_profiles")
+            self.collection = self.db.collection(settings.FIRESTORE_PROFILE_COLLECTION)
         else:
             self.collection = None
 

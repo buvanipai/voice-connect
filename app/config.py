@@ -1,21 +1,29 @@
-# app/config.py
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
-    ANTHROPIC_API_KEY: str = ""
-    MODEL_NAME: str = "claude-3-haiku-20240307"
+    APP_NAME: str = "VoiceConnect API"
+    APP_VERSION: str = "2.0.0"
+
+    FIRESTORE_PROFILE_COLLECTION: str = "caller_profiles"
+    FIRESTORE_FAILED_NOTIFICATION_COLLECTION: str = "failed_notifications"
+
+    ELEVENLABS_API_KEY: str = ""
+
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
-    SENDGRID_API_KEY: str = ""
-    SENDGRID_FROM_EMAIL: str = ""
-    
-    # Available job locations (sourced from knowledge base)
-    # Used for location matching logic
-    JOB_LOCATIONS: list = ["Schaumburg, IL"]  # Add more as jobs are added in other cities
-    
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    TWILIO_WHATSAPP_FROM: str = "whatsapp:+14155238886"
 
-# Create a global instance
+    FOLLOW_UP_URL: str = ""
+    FOLLOW_UP_COMPANY_NAME: str = "VoiceConnect"
+
+    GMAIL_SENDER_EMAIL: str = ""
+    GMAIL_APP_PASSWORD: str = ""
+
+    DASHBOARD_USERNAME: str = "admin"
+    DASHBOARD_PASSWORD: str = ""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 settings = Settings()
