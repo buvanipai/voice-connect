@@ -15,4 +15,6 @@ chroma_db/
 
 # Logs
 *.log
-*.json
+
+node_modules
+dist

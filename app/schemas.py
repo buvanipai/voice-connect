@@ -41,6 +41,7 @@ class ElevenLabsPostCallWebhook(ElevenLabsBaseModel):
 class InitiateCustomParameters(ElevenLabsBaseModel):
     caller_number: Optional[str] = None
     caller_id: Optional[str] = None
+    client_id: Optional[str] = None
     caller_country: Optional[str] = None
     caller_state: Optional[str] = None
     caller_city: Optional[str] = None
@@ -59,6 +60,7 @@ class ElevenLabsInitiateRequest(ElevenLabsBaseModel):
     # Flat fallback fields
     caller_id: Optional[str] = None
     caller_number: Optional[str] = None
+    client_id: Optional[str] = None
     agent_id: Optional[str] = None
     called_number: Optional[str] = None
     call_sid: Optional[str] = None

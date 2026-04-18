@@ -5,9 +5,12 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import ValidationError
 
 from app.config import settings
+from app.auth import router as auth_router
 from app.dashboard import router as dashboard_router
 from app.notifications import (
     send_email_followup,
@@ -26,6 +29,16 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router)
 app.include_router(dashboard_router)
 
 
@@ -310,6 +323,9 @@ def _trigger_follow_up(
     existing_profile: Dict[str, Any],
     call_sid: str,
     conversation_id: Optional[str],
+    from_number: Optional[str] = None,
+    client_gmail_refresh_token: Optional[str] = None,
+    client_gmail_email: Optional[str] = None,
 ) -> Dict[str, str]:
     contact_preference = _normalize_contact_preference(
         entities.get("contact_preference") or _get_profile_value(existing_profile, "contact_preference")
@@ -332,7 +348,11 @@ def _trigger_follow_up(
             return {"status": "failed", "channel": "email", "reason": reason}
 
         try:
-            send_email_followup(email_address)
+            send_email_followup(
+                email_address,
+                gmail_refresh_token=client_gmail_refresh_token,
+                gmail_from_email=client_gmail_email,
+            )
             return {"status": "sent", "channel": "email", "target": email_address}
         except Exception as exc:
             _log_failed_notification(
@@ -347,7 +367,7 @@ def _trigger_follow_up(
 
     if contact_preference == "whatsapp":
         try:
-            send_whatsapp_followup(caller_number)
+            send_whatsapp_followup(caller_number, from_number=from_number)
             return {"status": "sent", "channel": "whatsapp", "target": caller_number}
         except Exception as exc:
             _log_failed_notification(
@@ -398,7 +418,27 @@ async def elevenlabs_post_call(request: Request) -> Dict[str, Any]:
 
     caller_number, intent, entities, follow_up_context = _extract_profile_entities(event)
 
-    profile_service = ProfileService()
+    # Identify which client this call belongs to (passed through TwiML → ElevenLabs → post-call)
+    dynamic_variables = (
+        event.data.conversation_initiation_client_data.dynamic_variables or {}
+    )
+    client_id = _clean_string(dynamic_variables.get("client_id")) or "default"
+
+    # Look up client-specific data for follow-up sending
+    client_phone: Optional[str] = None
+    client_gmail_refresh_token: Optional[str] = None
+    client_gmail_email: Optional[str] = None
+    if client_id != "default":
+        _db = get_firestore_client()
+        if _db is not None:
+            _client_doc = _db.collection("clients").document(client_id).get()
+            if _client_doc.exists:
+                _client_data = _client_doc.to_dict() or {}
+                client_phone = _client_data.get("phone_number")
+                client_gmail_refresh_token = _client_data.get("gmail_refresh_token")
+                client_gmail_email = _client_data.get("gmail_email")
+
+    profile_service = ProfileService(client_id=client_id)
     existing_profile = profile_service.get_profile(caller_number) or {}
 
     shared_data = {
@@ -430,6 +470,9 @@ async def elevenlabs_post_call(request: Request) -> Dict[str, Any]:
         existing_profile=merged_profile,
         call_sid=follow_up_context["call_sid"],
         conversation_id=follow_up_context["conversation_id"],
+        from_number=client_phone,
+        client_gmail_refresh_token=client_gmail_refresh_token,
+        client_gmail_email=client_gmail_email,
     )
 
     logger.info("follow-up result: %s", follow_up_result)
@@ -469,7 +512,12 @@ async def elevenlabs_initiate(request: Request) -> ElevenLabsInitiateResponse:
     if not caller_number:
         raise HTTPException(status_code=400, detail="caller_number is required.")
 
-    profile = ProfileService().get_profile(caller_number) or {}
+    client_id = (
+        _clean_string(cp.client_id if cp and hasattr(cp, "client_id") else None)
+        or _clean_string(initiation_request.client_id if hasattr(initiation_request, "client_id") else None)
+        or "default"
+    )
+    profile = ProfileService(client_id=client_id).get_profile(caller_number) or {}
     logger.info(
         "initiate — caller=%s returning_caller=%s last_intent=%s",
         caller_number,
@@ -495,6 +543,30 @@ async def elevenlabs_initiate(request: Request) -> ElevenLabsInitiateResponse:
         dynamic_variables["agent_id"] = initiation_request.agent_id
 
     return ElevenLabsInitiateResponse(dynamic_variables=dynamic_variables)
+
+
+@app.get("/twilio/voice/{client_id}")
+async def twilio_voice(client_id: str) -> Response:
+    """Returns TwiML that routes an inbound call to the client's ElevenLabs agent."""
+    from app.services.profile_services import get_firestore_client as _get_db
+    db = _get_db()
+    agent_id = settings.ELEVENLABS_AGENT_ID  # fallback to template agent
+
+    if db is not None:
+        doc = db.collection("clients").document(client_id).get()
+        if doc.exists:
+            agent_id = (doc.to_dict() or {}).get("agent_id") or agent_id
+
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="wss://api.elevenlabs.io/v1/convai/twilio?agent_id={agent_id}">
+      <Parameter name="caller_id" value="{{{{From}}}}"/>
+      <Parameter name="client_id" value="{client_id}"/>
+    </Stream>
+  </Connect>
+</Response>"""
+    return Response(content=twiml, media_type="application/xml")
 
 
 @app.get("/health", response_model=HealthResponse)

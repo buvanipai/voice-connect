@@ -1,319 +1,285 @@
-# VoiceConnect - AI-Powered Voice Receptionist
+# VoiceConnect
 
-An intelligent voice receptionist for Bhuvi IT Solutions that handles incoming phone calls, classifies user intent, extracts information, and routes calls appropriately.
+A multi-tenant SaaS platform that gives any business an AI phone number. When someone calls, an agentic AI answers, holds a real conversation, collects caller details, and sends a follow-up SMS or email — all automatically.
 
-## 🎯 Features
+## What it does
 
-- **Intelligent Call Classification**: Automatically identifies Job Seekers, Client Leads, and General Inquiries
-- **Real-Time Job Integration**: Fetches current job openings from BhuviIT website
-- **Conversation Memory**: Tracks conversation history to avoid repeating questions
-- **Multi-Language Support**: Supports English, Spanish, and Hindi (with language tags)
-- **RAG-Powered Responses**: Uses ChromaDB + Sentence Transformers for context-aware answers
-- **Speech-to-Text**: Deepgram integration for accurate transcription
-- **AI-Powered Dialogue**: Claude (Anthropic) for intelligent responses
-- **Automated Job Updates**: Web scraper to keep job listings fresh
+A business signs up and gets their own dedicated phone number. When a caller dials that number, an agentic voice AI answers, has a natural back-and-forth conversation, identifies what the caller wants (job inquiry, sales lead, general question), and collects the relevant details. After the call ends, the system saves a caller profile and sends a follow-up via WhatsApp/SMS or email.
 
-## 📋 Prerequisites
+Admins manage all of this from a single dashboard. Clients log in to see their own callers and customise their follow-up messages.
 
-- Python 3.12
-- Google Cloud account (for deployment)
-- Twilio account (for phone integration)
-- API Keys:
-  - Anthropic API Key
-  - Deepgram API Key
+## Tech stack
 
-## 🚀 Local Setup
+| Layer | Technology |
+|---|---|
+| Backend API | FastAPI (Python), deployed on Google Cloud Run |
+| Database | Google Cloud Firestore |
+| Phone | Twilio (inbound call routing via TwiML, WhatsApp/SMS follow-ups) |
+| Voice AI | Agentic conversational AI (per-client agents with client-specific knowledge bases) |
+| Frontend | React 18 + Vite + Tailwind CSS, deployed on Google Cloud Run |
+| Auth | JWT (HS256) + bcrypt, Google OAuth for per-client Gmail integration |
+| Email | Gmail API (OAuth) or Gmail SMTP app password |
 
-### 1. Clone & Install
+## Architecture overview
 
-```bash
-git clone <your-repo-url>
-cd ghost-phone
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+```
+Caller → Twilio number
+           ↓ TwiML routes to voice AI agent (GET /twilio/voice/{client_id})
+        Agentic AI ←→ Client knowledge base (scraped from their website)
+           ↓ POST /elevenlabs/initiate  (pre-call: inject caller profile)
+           ↓ POST /elevenlabs/post-call (after call: save profile + trigger follow-up)
+        Firestore (caller profiles, client records, failed notifications)
+           ↓
+        Twilio WhatsApp or Gmail → Caller
 ```
 
-### 2. Configure Environment Variables
+**Multi-tenancy:** Each client gets their own Firestore sub-collection (`clients/{client_id}/caller_profiles`), their own AI agent, and their own knowledge base.
+
+**Returning callers:** On each call, the `/elevenlabs/initiate` endpoint looks up the caller's existing profile and injects it as dynamic variables into the agent, so the AI already knows who they are.
+
+## API endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check + Firestore status |
+| `POST` | `/elevenlabs/initiate` | Pre-call hook: returns caller profile as dynamic variables |
+| `POST` | `/elevenlabs/post-call` | Post-call webhook: saves profile + sends follow-up |
+| `GET` | `/twilio/voice/{client_id}` | Returns TwiML routing the call to the client's agent |
+| `POST` | `/auth/login` | Admin or client login → JWT |
+| `POST` | `/auth/signup` | Client self-serve signup (creates pending account) |
+| `GET` | `/auth/gmail/connect-url` | Returns Google OAuth URL to connect client's Gmail |
+| `GET` | `/auth/gmail/callback` | OAuth callback; stores refresh token in Firestore |
+| `GET` | `/api/clients` | Admin: list all clients |
+| `POST` | `/api/clients` | Admin: create client (provisions KB + agent + phone number) |
+| `POST` | `/api/clients/{id}/provision` | Admin: provision a pending client |
+| `DELETE` | `/api/clients/{id}` | Admin: delete client + release resources |
+| `GET` | `/api/callers` | Admin: list callers across all clients |
+| `GET` | `/api/callers/{phone}` | Admin: get caller detail |
+| `GET` | `/api/settings` | Admin: read platform-wide SMS templates |
+| `POST` | `/api/settings` | Admin: update platform-wide SMS templates |
+| `GET` | `/api/failed-notifications` | Admin: list failed follow-up attempts |
+| `GET` | `/me/profile` | Client: their own profile |
+| `GET` | `/me/callers` | Client: their own callers |
+| `GET` | `/me/callers/{phone}` | Client: caller detail |
+| `GET` | `/me/settings` | Client: their follow-up SMS copy |
+| `POST` | `/me/settings` | Client: save their follow-up SMS copy |
+
+## Local setup
+
+### Prerequisites
+
+- Python 3.12
+- Node.js 18+
+- A Google Cloud project with Firestore enabled
+- Twilio account
+- Agentic voice AI platform credentials (agent ID + API key)
+
+### Backend
+
+```bash
+cd ghost-phone
+
+python3 -m venv venv
+source venv/bin/activate
+
+pip install -r requirements.txt
+```
 
 Create a `.env` file:
 
 ```bash
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-DEEPGRAM_API_KEY=your_deepgram_api_key_here
+# AI agent
+ELEVENLABS_API_KEY=
+ELEVENLABS_AGENT_ID=          # template agent to clone for new clients
+
+# Twilio
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+
+# Follow-up
+FOLLOW_UP_URL=                 # link sent to callers (e.g. resume upload page)
+FOLLOW_UP_COMPANY_NAME=VoiceConnect
+
+# Gmail (platform-level fallback sender)
+GMAIL_SENDER_EMAIL=
+GMAIL_APP_PASSWORD=
+
+# Google OAuth (for per-client Gmail connect)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=
+
+# Auth
+JWT_SECRET_KEY=                # long random string
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=
+
+# CORS
+CORS_ORIGINS=http://localhost:5173
 ```
 
-### 3. Initialize Knowledge Base
+Start the server:
 
 ```bash
-# Generate vector database from knowledge base
-python3 ingest.py
-```
-
-You should see: `✅ Successfully stored X facts in the Vector Database!`
-
-### 4. Run Locally
-
-```bash
-# Start the server
 uvicorn app.main:app --reload --port 8000
+```
 
-# In another terminal, expose with ngrok (for Twilio testing)
+For local Twilio webhook testing, expose the server:
+
+```bash
 ngrok http 8000
 ```
 
-### 5. Test the API
+### Frontend
 
 ```bash
-# Test health endpoint
-curl http://localhost:8000/
-
-# Test AI response
-curl -X POST http://localhost:8000/process-speech \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Hi, I am looking for a job", "language": "en"}'
+cd frontend
+npm install
+npm run dev
 ```
 
-## ☁️ Google Cloud Deployment
+The frontend runs on `http://localhost:5173` and expects the backend at `http://localhost:8000`.
 
-### Automated Deployment
+## Deployment (Google Cloud Run)
 
-This project uses Docker and deploys to Google Cloud Run.
-
-### Deploy Steps
-
-1. **Build & Deploy**:
+### Backend
 
 ```bash
-# Set your project ID
 gcloud config set project YOUR_PROJECT_ID
 
-# Build and deploy
-gcloud run deploy voice-connect \
+gcloud run deploy voiceconnect-api \
   --source . \
   --platform managed \
   --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars ANTHROPIC_API_KEY=your_key,DEEPGRAM_API_KEY=your_key
+  --allow-unauthenticated
 ```
 
-2. **Post-Deployment Setup**:
+Set all environment variables via the Cloud Run console or `--set-env-vars`.
 
-The Dockerfile automatically runs `ingest.py` during container build, so the vector database is ready on deployment.
-
-3. **Configure Twilio**:
-
-- Go to your Twilio Console
-- Navigate to your phone number settings
-- Set **Voice Webhook** to: `https://your-cloud-run-url.run.app/voice`
-- Set **Status Callback URL** to: `https://your-cloud-run-url.run.app/call-status`
-- Set both to **HTTP POST**
-
-## 🔄 Updating Job Listings
-
-### Automatic Scraper
+### Frontend
 
 ```bash
-# Fetch latest jobs from website and update knowledge base
-python3 jobs_scraper.py
+cd frontend
+npm run build
 
-# Re-ingest to update vector database
-python3 ingest.py
+gcloud run deploy voiceconnect-frontend \
+  --source . \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated
 ```
 
-### Schedule with Cron (Production)
+### After deploying
 
-```bash
-# On your server, add to crontab:
-0 9 * * * cd /path/to/ghost-phone && python3 jobs_scraper.py && python3 ingest.py
+Point each provisioned Twilio number's voice webhook at:
+```
+https://your-api-url.run.app/twilio/voice/{client_id}
 ```
 
-This runs daily at 9 AM to keep job listings fresh.
+This is done automatically during client provisioning if the backend URL is correct.
 
-## 📞 Call Flow
+## Client provisioning flow
 
-### For Job Seekers:
-1. User: "I'm looking for a job"
-2. AI asks: Which role are you interested in?
-3. AI asks: What's your tech stack?
-4. AI asks: Years of experience?
-5. AI asks: Willing to relocate/travel to US?
-6. AI asks: Visa status?
-7. AI generates **Call Whisper** summary of conversation
-8. AI: "Thank you! Let me forward you to a recruiter."
-9. **System plays whisper to recruiter** (e.g., "Job seeker. Interested in Software Engineer role. 5 years Python/React/AWS. Has green card.")
-10. Call forwards to Subbu
+1. Client signs up at `/signup` → account created in Firestore with status `pending`
+2. Admin clicks **Provision** in the dashboard
+3. Backend automatically:
+   - Creates a knowledge base from the client's website URL
+   - Clones the template agent with that knowledge base
+   - Buys a Twilio phone number in the client's preferred area code
+   - Wires the Twilio webhook to `/twilio/voice/{client_id}`
+4. Status becomes `active` — client is live
 
-### For Client Leads:
-1. User: "We need to hire developers"
-2. AI asks: What roles are you looking for?
-3. AI asks: What tech stack/skills?
-4. AI asks: Prefer nearshore or US-based?
-5. AI generates **Call Whisper** summary
-6. AI: "Thank you! Let me forward you to our representative."
-7. **System plays whisper to representative** (e.g., "Client lead. Hiring for AI engineers. Need Python, ML expertise. Interested in nearshore.")
-8. Call forwards to Subbu
+If provisioning fails (e.g. no number available in that area code), the error is stored and admin can retry.
 
-### For General Inquiries:
-- AI provides information from knowledge base
-- Mentions TN Visas, Nearshore delivery, NearMind, etc.
+## Caller profile structure
 
-## 🎤 Call Whisper (AI-Generated Brief)
+Profiles in Firestore are namespaced per client and keyed by E.164 phone number:
 
-When a call is ready to forward, the system:
-1. **Generates a concise summary** using Claude from the conversation history
-2. **Plays it as a "whisper"** to the recruiter/representative before connecting
-3. **Caller hears nothing** - just music or silence while waiting
+```json
+{
+  "last_intent": "JOB_SEEKER",
+  "last_interaction": "2026-04-17T10:00:00Z",
+  "created_at": "2026-04-01T09:00:00Z",
+  "intents": {
+    "JOB_SEEKER": {
+      "name": "Jane Smith",
+      "email_address": "jane@example.com",
+      "role_interest": "Software Engineer",
+      "experience_years": "5",
+      "contact_preference": "email",
+      "transcript_summary": "..."
+    },
+    "GENERAL_INQUIRY": { ... }
+  }
+}
+```
 
-**Example Whisper**: *"Job seeker ahead. Name provided: John. Senior Software Engineer role. 8 years experience in Python, AWS, Docker. Willing to relocate to Chicago. Currently on H-1B needing sponsorship. Green card application pending."*
+Each intent is stored separately so a returning caller who called about a job once and a general inquiry another time has both records preserved.
 
-This ensures Subbu has **full context** without asking the caller to repeat information.
+## Follow-up logic
 
-## 📁 Project Structure
+After each call, the system checks the caller's `contact_preference`:
+
+- **`email`** — sends via the client's connected Gmail (OAuth) if available, otherwise falls back to the platform Gmail SMTP account
+- **`whatsapp`** — sends via Twilio WhatsApp from the client's purchased number
+- **anything else / missing** — logs a failed notification to Firestore
+
+Failed follow-ups are visible on the admin **Failed Notifications** page with the exact reason.
+
+## Environment variables reference
+
+| Variable | Description | Required |
+|---|---|---|
+| `ELEVENLABS_API_KEY` | Voice AI platform API key | Yes |
+| `ELEVENLABS_AGENT_ID` | Template agent ID to clone per client | Yes |
+| `TWILIO_ACCOUNT_SID` | Twilio account SID | Yes |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token | Yes |
+| `TWILIO_WHATSAPP_FROM` | Default WhatsApp sender (sandbox or approved number) | Yes |
+| `FOLLOW_UP_URL` | Link included in follow-up messages | Yes |
+| `FOLLOW_UP_COMPANY_NAME` | Company name in follow-up messages | No |
+| `GMAIL_SENDER_EMAIL` | Platform-level fallback sender email | No |
+| `GMAIL_APP_PASSWORD` | App password for platform Gmail | No |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID (for per-client Gmail) | No |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | No |
+| `GOOGLE_REDIRECT_URI` | OAuth redirect URI | No |
+| `JWT_SECRET_KEY` | Secret for signing JWTs | Yes |
+| `DASHBOARD_USERNAME` | Admin login username | Yes |
+| `DASHBOARD_PASSWORD` | Admin login password | Yes |
+| `JWT_EXPIRE_MINUTES` | Token lifetime in minutes (default: 1440) | No |
+| `CORS_ORIGINS` | Comma-separated allowed origins | Yes |
+
+## Project structure
 
 ```
 ghost-phone/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI endpoints
-│   ├── config.py            # Settings
-│   ├── schemas.py           # Pydantic models
-│   ├── interfaces.py        # Type definitions
-│   ├── data/
-│   │   └── knowledge_base.txt   # Company & job information
+│   ├── main.py                  # FastAPI app, webhook handlers, call routing
+│   ├── auth.py                  # JWT auth, login/signup, Gmail OAuth
+│   ├── dashboard.py             # Admin + client API routes
+│   ├── notifications.py         # WhatsApp + email follow-up sending
+│   ├── config.py                # Settings (pydantic-settings)
+│   ├── schemas.py               # Pydantic models for webhooks
 │   └── services/
-│       ├── llm_service.py   # Claude AI integration + Call Whisper generation
-│       └── stt_service.py   # Deepgram speech-to-text
-├── chroma_db/               # Vector database (generated, not in git)
-├── ingest.py                # Knowledge base ingestion script
-├── jobs_scraper.py          # Automated job listing scraper
-├── requirements.txt         # Python dependencies
-├── Dockerfile               # Container configuration
-└── README.md                # This file
+│       └── profile_services.py  # Firestore read/write for caller profiles
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx              # React router
+│   │   ├── api.js               # API client
+│   │   ├── pages/
+│   │   │   ├── Login.jsx
+│   │   │   ├── admin/           # Clients, Callers, Settings, FailedNotifications
+│   │   │   └── client/          # Callers, Settings
+│   │   └── components/
+│   │       ├── Layout.jsx
+│   │       └── CallerSlideOver.jsx
+│   ├── package.json
+│   └── vite.config.js
+├── requirements.txt
+├── USER_MANUAL.md               # Admin operations guide
+└── README.md
 ```
 
-## 🧪 Testing
+## License
 
-### Test Endpoints
-
-```bash
-# Process speech endpoint
-curl -X POST http://localhost:8000/process-speech \
-  -H "Content-Type: application/json" \
-  -d '{"text": "What job positions do you have?", "language": "en"}'
-
-# Voice webhook (Twilio entry point)
-curl -X POST http://localhost:8000/voice \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "CallSid=TEST123"
-```
-
-### Test Call Scenarios
-
-1. **Job Seeker**: Call and say "I'm looking for a software engineer job"
-2. **Client**: Call and say "We need to hire AI developers"
-3. **General**: Call and say "Do you handle TN visas?"
-4. **Forward**: Ask "Can I speak to someone?" to trigger forwarding
-
-## 🛠️ Configuration
-
-### Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `ANTHROPIC_API_KEY` | Claude API key for AI responses | Yes |
-| `DEEPGRAM_API_KEY` | Deepgram API key for speech-to-text | Yes |
-| `MODEL_NAME` | Claude model (default: claude-3-haiku-20240307) | No |
-
-### Timeouts
-
-- Recording timeout: **3 seconds** of silence
-- Max recording length: **30 seconds**
-- Initial greeting length: **10 seconds**
-
-### Knowledge Base
-
-Edit `app/data/knowledge_base.txt` to update:
-- Company information
-- Services offered
-- Job listings (or use the scraper)
-
-After editing, run: `python3 ingest.py`
-
-## 📊 Monitoring
-
-### Logs
-
-View logs in Google Cloud Console or locally:
-
-```bash
-# Local logs show:
-[NEW CALL] CallSid: CAxxxx
-[CAxxxx] User said: I'm looking for a job
-[CAxxxx] AI response: [EN] Great! Which role are you interested in?
-[CAxxxx] Conversation history length: 1
-```
-
-## 🚀 Enabling Call Whisper in Production
-
-Currently, for testing, the call whisper is played to the caller before hanging up (marked as `[RECRUITER BRIEF]`).
-
-To enable **actual call forwarding with whisper to Subbu**:
-
-1. **Replace the Hangup logic in `app/main.py`** (~line 177):
-
-```python
-# Replace this:
-<Hangup/>
-
-# With this:
-<Dial callerId="+1-YOUR-TWILIO-NUMBER">
-    <Gather input="dtmf" numDigits="1" timeout="10">
-        <Say>{call_whisper}</Say>
-    </Gather>
-    +1-SUBBU-PHONE-NUMBER
-</Dial>
-```
-
-2. **Set Subbu's phone number** in your environment or config
-
-3. **Test the entire flow** with a test call
-
-The `call_whisper` variable contains the AI-generated summary that Subbu will hear before the caller is connected.
-
-### Common Issues
-
-**Issue**: AI not mentioning jobs  
-**Solution**: Run `python3 ingest.py` to regenerate vector database
-
-**Issue**: Call ends immediately  
-**Solution**: Check Twilio webhook URLs are correct
-
-**Issue**: "ERROR" response from AI  
-**Solution**: Check API keys in `.env` and server logs
-
-**Issue**: Call Whisper is empty  
-**Solution**: Ensure conversation has at least one exchange before forwarding
-
-## 🔐 Security
-
-- ⚠️ **Never commit `.env`** - it contains sensitive API keys
-- ⚠️ **Don't commit `chroma_db/`** - regenerate on deployment
-- ✅ Use environment variables in Google Cloud Run
-- ✅ Regularly rotate API keys
-
-## 📝 License
-
-Proprietary - Bhuvi IT Solutions
-
-## 👥 Support
-
-For issues or questions, contact the Bhuvi IT development team.
-
----
-
-Built with ❤️ for Bhuvi IT Solutions
+Proprietary — Bhuvi IT Solutions
