@@ -22,7 +22,7 @@ function EntityRow({ label, value }) {
   )
 }
 
-function IntentCard({ intentName, data }) {
+function IntentCard({ intentKey, intentLabel, data }) {
   if (!data || typeof data !== 'object') return null
 
   const summary = data.transcript_summary
@@ -31,7 +31,7 @@ function IntentCard({ intentName, data }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="mb-3 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
-        {intentName}
+        {intentLabel}
       </div>
 
       {entities.length > 0 && (
@@ -54,7 +54,12 @@ function IntentCard({ intentName, data }) {
   )
 }
 
-export default function CallerSlideOver({ caller, onClose }) {
+function resolveLabel(key, labels) {
+  if (labels && labels[key]) return labels[key]
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+export default function CallerSlideOver({ caller, intentLabels, onClose }) {
   useEffect(() => {
     function onKey(e) {
       if (e.key === 'Escape') onClose()
@@ -134,8 +139,13 @@ export default function CallerSlideOver({ caller, onClose }) {
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
                     Intent history
                   </div>
-                  {intentNames.map((name) => (
-                    <IntentCard key={name} intentName={name} data={intents[name]} />
+                  {intentNames.map((key) => (
+                    <IntentCard
+                      key={key}
+                      intentKey={key}
+                      intentLabel={resolveLabel(key, intentLabels)}
+                      data={intents[key]}
+                    />
                   ))}
                 </div>
               ) : (

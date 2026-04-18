@@ -3,7 +3,12 @@ import Layout from '../../components/Layout'
 import CallerSlideOver from '../../components/CallerSlideOver'
 import { api } from '../../api'
 
-const INTENTS = ['', 'JOB_SEEKER', 'US_STAFFING', 'SALES', 'GENERAL_INQUIRY']
+const INTENT_KEYS = ['JOB_SEEKER', 'US_STAFFING', 'SALES', 'GENERAL_INQUIRY']
+
+function resolveLabel(key, labels) {
+  if (labels && labels[key]) return labels[key]
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
 
 function statusTone(status) {
   if (status === 'active') return 'border-emerald-200 bg-emerald-50 text-emerald-800'
@@ -17,6 +22,7 @@ export default function ClientCallers() {
   const [callers, setCallers] = useState([])
   const [intent, setIntent] = useState('')
   const [loading, setLoading] = useState(true)
+  const [intentLabels, setIntentLabels] = useState({})
   const [selectedPhone, setSelectedPhone] = useState(null)
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -39,12 +45,15 @@ export default function ClientCallers() {
   }
 
   useEffect(() => {
-    loadProfile().then((data) => {
-      if (data.status !== 'active') {
-        setCallers([])
-        setLoading(false)
-      }
-    })
+    Promise.all([loadProfile(), api.meGetSettings()])
+      .then(([data, settingsData]) => {
+        setIntentLabels(settingsData.intent_labels || {})
+        if (data.status !== 'active') {
+          setCallers([])
+          setLoading(false)
+        }
+      })
+      .catch(() => setLoading(false))
   }, [])
 
   useEffect(() => {
@@ -143,9 +152,10 @@ export default function ClientCallers() {
               onChange={(e) => setIntent(e.target.value)}
               className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
             >
-              {INTENTS.map((item) => (
-                <option key={item} value={item}>
-                  {item || 'All intents'}
+              <option value="">All types</option>
+              {INTENT_KEYS.map((key) => (
+                <option key={key} value={key}>
+                  {resolveLabel(key, intentLabels)}
                 </option>
               ))}
             </select>
@@ -180,7 +190,7 @@ export default function ClientCallers() {
                       <td className="px-4 py-3">
                         {caller.last_intent ? (
                           <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                            {caller.last_intent}
+                            {resolveLabel(caller.last_intent, intentLabels)}
                           </span>
                         ) : '—'}
                       </td>
@@ -208,6 +218,7 @@ export default function ClientCallers() {
       {(selectedPhone || detailLoading) && (
         <CallerSlideOver
           caller={detailLoading ? { phone_number: selectedPhone } : detail}
+          intentLabels={intentLabels}
           onClose={closeDetail}
         />
       )}

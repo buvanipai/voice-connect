@@ -2,9 +2,16 @@ import { useEffect, useState } from 'react'
 import Layout from '../../components/Layout'
 import { api } from '../../api'
 
+const INTENT_KEYS = [
+  { key: 'JOB_SEEKER',      placeholder: 'e.g. Job Applicant' },
+  { key: 'US_STAFFING',     placeholder: 'e.g. Staffing Request' },
+  { key: 'SALES',           placeholder: 'e.g. Sales Inquiry' },
+  { key: 'GENERAL_INQUIRY', placeholder: 'e.g. General Question' },
+]
+
 export default function ClientSettings() {
   const [profile, setProfile] = useState(null)
-  const [form, setForm] = useState({ sms_job_seeker: '', sms_sales: '' })
+  const [form, setForm] = useState({ sms_job_seeker: '', sms_sales: '', intent_labels: {} })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -19,6 +26,7 @@ export default function ClientSettings() {
         setForm({
           sms_job_seeker: settingsData.sms_job_seeker || '',
           sms_sales: settingsData.sms_sales || '',
+          intent_labels: settingsData.intent_labels || {},
         })
       })
       .catch((err) => setError(err.message || 'Unable to load settings'))
@@ -158,6 +166,39 @@ export default function ClientSettings() {
               className="w-full resize-none rounded-2xl border border-slate-300 px-4 py-3 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
               placeholder="Leave blank to inherit the admin default."
             />
+          </div>
+
+          <div className="border-t border-slate-100 pt-5">
+            <div className="mb-3">
+              <div className="text-sm font-medium text-slate-700">Caller type labels</div>
+              <p className="mt-1 text-xs text-slate-500">
+                Rename caller categories to match your business. These labels appear in your callers table and detail views.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {INTENT_KEYS.map(({ key, placeholder }) => (
+                <div key={key}>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    {key.replace(/_/g, ' ')}
+                  </label>
+                  <input
+                    type="text"
+                    value={form.intent_labels[key] || ''}
+                    onChange={(e) =>
+                      setForm((current) => ({
+                        ...current,
+                        intent_labels: {
+                          ...current.intent_labels,
+                          [key]: e.target.value,
+                        },
+                      }))
+                    }
+                    placeholder={placeholder}
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  />
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="flex items-center gap-3">

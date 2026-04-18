@@ -3,7 +3,12 @@ import Layout from '../../components/Layout'
 import CallerSlideOver from '../../components/CallerSlideOver'
 import { api } from '../../api'
 
-const INTENTS = ['', 'JOB_SEEKER', 'US_STAFFING', 'SALES', 'GENERAL_INQUIRY']
+const INTENT_KEYS = ['JOB_SEEKER', 'US_STAFFING', 'SALES', 'GENERAL_INQUIRY']
+
+function resolveLabel(key, labels) {
+  if (labels && labels[key]) return labels[key]
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
 
 export default function AdminCallers() {
   const [clients, setClients] = useState([])
@@ -11,12 +16,18 @@ export default function AdminCallers() {
   const [clientId, setClientId] = useState('')
   const [intent, setIntent] = useState('')
   const [loading, setLoading] = useState(false)
+  const [intentLabels, setIntentLabels] = useState({})
   const [selectedPhone, setSelectedPhone] = useState(null)
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
-    api.listClients().then(setClients).catch(() => {})
+    Promise.all([api.listClients(), api.getSettings()])
+      .then(([clientsData, settingsData]) => {
+        setClients(clientsData)
+        setIntentLabels(settingsData.intent_labels || {})
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -78,8 +89,9 @@ export default function AdminCallers() {
           onChange={(e) => setIntent(e.target.value)}
           className={selectClass}
         >
-          {INTENTS.map((i) => (
-            <option key={i} value={i}>{i || 'All intents'}</option>
+          <option value="">All types</option>
+          {INTENT_KEYS.map((key) => (
+            <option key={key} value={key}>{resolveLabel(key, intentLabels)}</option>
           ))}
         </select>
       </div>
@@ -115,7 +127,7 @@ export default function AdminCallers() {
                     <td className="px-4 py-3">
                       {c.last_intent ? (
                         <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                          {c.last_intent}
+                          {resolveLabel(c.last_intent, intentLabels)}
                         </span>
                       ) : '—'}
                     </td>
@@ -134,6 +146,7 @@ export default function AdminCallers() {
       {(selectedPhone || detailLoading) && (
         <CallerSlideOver
           caller={detailLoading ? { phone_number: selectedPhone } : detail}
+          intentLabels={intentLabels}
           onClose={closeDetail}
         />
       )}

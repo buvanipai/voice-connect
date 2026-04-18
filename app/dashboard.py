@@ -207,6 +207,7 @@ async def me_get_settings(user: UserContext = Depends(require_client)) -> Dict[s
     return {
         "sms_job_seeker": data.get("sms_job_seeker", ""),
         "sms_sales": data.get("sms_sales", ""),
+        "intent_labels": data.get("intent_labels", {}),
     }
 
 
@@ -215,7 +216,7 @@ async def me_save_settings(
     payload: Dict[str, Any] = Body(...),
     user: UserContext = Depends(require_client),
 ) -> Dict[str, Any]:
-    allowed = {"sms_job_seeker", "sms_sales"}
+    allowed = {"sms_job_seeker", "sms_sales", "intent_labels"}
     data = {k: v for k, v in payload.items() if k in allowed}
     if not data:
         raise HTTPException(status_code=400, detail="No valid settings fields provided.")
@@ -593,7 +594,7 @@ async def save_settings(
     payload: Dict[str, Any] = Body(...),
     _: UserContext = Depends(require_admin_flexible),
 ) -> Dict[str, Any]:
-    allowed = {"sms_job_seeker", "sms_sales"}
+    allowed = {"sms_job_seeker", "sms_sales", "intent_labels"}
     data = {k: v for k, v in payload.items() if k in allowed}
     if not data:
         raise HTTPException(status_code=400, detail="No valid settings fields provided.")
