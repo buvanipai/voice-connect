@@ -18,6 +18,7 @@ export default function AdminCallers() {
   const [loading, setLoading] = useState(false)
   const [intentLabels, setIntentLabels] = useState({})
   const [selectedPhone, setSelectedPhone] = useState(null)
+  const [selectedClientId, setSelectedClientId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
@@ -38,12 +39,13 @@ export default function AdminCallers() {
       .finally(() => setLoading(false))
   }, [clientId, intent])
 
-  async function openDetail(phone) {
+  async function openDetail(phone, callerClientId) {
     setSelectedPhone(phone)
+    setSelectedClientId(callerClientId || clientId || null)
     setDetailLoading(true)
     setDetail(null)
     try {
-      const data = await api.getCaller(phone, clientId || null)
+      const data = await api.getCaller(phone, callerClientId || clientId || null)
       setDetail(data)
     } finally {
       setDetailLoading(false)
@@ -52,6 +54,7 @@ export default function AdminCallers() {
 
   function closeDetail() {
     setSelectedPhone(null)
+    setSelectedClientId(null)
     setDetail(null)
   }
 
@@ -119,7 +122,7 @@ export default function AdminCallers() {
                 {callers.map((c) => (
                   <tr
                     key={c.phone_number}
-                    onClick={() => openDetail(c.phone_number)}
+                    onClick={() => openDetail(c.phone_number, c.client_id)}
                     className="cursor-pointer hover:bg-amber-50"
                   >
                     <td className="px-4 py-3 font-mono text-xs text-slate-700">{c.phone_number}</td>

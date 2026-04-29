@@ -204,8 +204,9 @@ export default function Login({ initialMode = 'login' }) {
               />
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field
-                  label="Area code"
+                  label="Area code or ZIP"
                   type="text"
+                  placeholder="e.g. 847 or 60201"
                   value={signupForm.area_code}
                   onChange={(e) => setSignupForm((current) => ({ ...current, area_code: e.target.value }))}
                 />

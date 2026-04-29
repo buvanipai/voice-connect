@@ -3,7 +3,7 @@ import logging
 import secrets
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from jose import JWTError, jwt
@@ -20,6 +20,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _basic_security = HTTPBasic(auto_error=False)
 
 CLIENTS_COLLECTION = "clients"
+DEFAULT_PLAN = "starter"
 GMAIL_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -251,6 +252,12 @@ async def signup(body: SignupRequest) -> TokenResponse:
         "requested_at": now,
         "sms_job_seeker": "",
         "sms_sales": "",
+        "plan": DEFAULT_PLAN,
+        "minutes_used": 0,
+        "channels": {"email": True, "sms": False},
+        "sms_10dlc_approved": False,
+        "forward_to_number": None,
+        "usage": {},
     }
 
     if not payload["name"] or not payload["website_url"]:
@@ -267,6 +274,78 @@ async def signup(body: SignupRequest) -> TokenResponse:
     doc_ref = db.collection(CLIENTS_COLLECTION).document()
     doc_ref.set(payload)
     return _build_client_token(email, doc_ref.id, payload["status"])
+
+
+@router.post("/password-reset-request")
+async def password_reset_request(
+    payload: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    """Request a password reset by email. Returns success message."""
+    email = (payload.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email is required.")
+
+    client_data = get_client_by_email(email)
+    if not client_data:
+        # For security, don't reveal if email exists or not
+        return {"status": "reset_email_sent", "message": "If an account exists, a reset link will be sent."}
+
+    # Generate a time-based reset token (expires in 1 hour)
+    reset_token = _create_access_token(
+        {"sub": email, "purpose": "password_reset", "exp": dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)}
+    )
+
+    # In a real app, send an email with the reset link
+    # For now, log it (the token would be sent in a reset URL)
+    logger.info(
+        "Password reset requested for %s. Token: %s...",
+        email,
+        reset_token[:20],
+    )
+
+    return {"status": "reset_email_sent", "message": "If an account exists, a reset link will be sent."}
+
+
+@router.post("/password-reset")
+async def password_reset(
+    payload: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    """Reset password using a valid reset token."""
+    token = (payload.get("token") or "").strip()
+    new_password = (payload.get("password") or "").strip()
+
+    if not token or not new_password:
+        raise HTTPException(status_code=400, detail="token and password are required.")
+
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    try:
+        decoded = decode_jwt(token)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Invalid or expired reset token.")
+
+    email = decoded.get("sub", "").strip().lower()
+    purpose = decoded.get("purpose", "")
+    if purpose != "password_reset" or not email:
+        raise HTTPException(status_code=401, detail="Invalid reset token.")
+
+    db = get_firestore_client()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Firestore unavailable.")
+
+    # Find and update the client
+    query = db.collection(CLIENTS_COLLECTION).where("email", "==", email).limit(1)
+    updated = False
+    for doc in query.stream():
+        doc.reference.update({"hashed_password": hash_password(new_password)})
+        updated = True
+        break
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Client not found.")
+
+    return {"status": "password_reset_success", "message": "Password has been reset. Please log in."}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -317,11 +396,15 @@ def _get_oauth_flow():
             "redirect_uris": [settings.GOOGLE_REDIRECT_URI],
         }
     }
-    return Flow.from_client_config(
+    flow = Flow.from_client_config(
         client_config,
         scopes=GMAIL_SCOPES,
         redirect_uri=settings.GOOGLE_REDIRECT_URI,
     )
+    # Confidential server client with client_secret — PKCE adds no security and
+    # can't round-trip across requests (each /gmail/* call creates a fresh Flow).
+    flow.autogenerate_code_verifier = False
+    return flow
 
 
 def _build_gmail_connect_url(client_id: str) -> str:

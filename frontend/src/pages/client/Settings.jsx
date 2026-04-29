@@ -11,35 +11,98 @@ const INTENT_KEYS = [
 
 export default function ClientSettings() {
   const [profile, setProfile] = useState(null)
-  const [form, setForm] = useState({ sms_job_seeker: '', sms_sales: '', intent_labels: {} })
+  const [form, setForm] = useState({
+    sms_job_seeker: '',
+    sms_sales: '',
+    intent_labels: {},
+    forward_to_number: '',
+    inactivity_timeout_seconds: 28,
+    max_call_duration_seconds: 300,
+    channels: { email: true, sms: false },
+  })
+  const [sms10dlcApproved, setSms10dlcApproved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [gmailLoading, setGmailLoading] = useState(false)
   const [error, setError] = useState('')
+  const [agentPrompt, setAgentPrompt] = useState('')
+  const [agentLoading, setAgentLoading] = useState(false)
+  const [agentSaving, setAgentSaving] = useState(false)
+  const [agentSaved, setAgentSaved] = useState(false)
+  const [agentError, setAgentError] = useState('')
 
   useEffect(() => {
     Promise.all([api.meProfile(), api.meGetSettings()])
       .then(([profileData, settingsData]) => {
         setProfile(profileData)
         localStorage.setItem('vc_status', profileData.status || '')
+        setSms10dlcApproved(Boolean(settingsData.sms_10dlc_approved))
         setForm({
           sms_job_seeker: settingsData.sms_job_seeker || '',
           sms_sales: settingsData.sms_sales || '',
           intent_labels: settingsData.intent_labels || {},
+          forward_to_number: settingsData.forward_to_number || '',
+          inactivity_timeout_seconds: settingsData.inactivity_timeout_seconds || 28,
+          max_call_duration_seconds: settingsData.max_call_duration_seconds || 300,
+          channels: {
+            email: settingsData.channels?.email !== false,
+            sms: Boolean(settingsData.channels?.sms),
+          },
         })
       })
       .catch((err) => setError(err.message || 'Unable to load settings'))
       .finally(() => setLoading(false))
   }, [])
 
+  useEffect(() => {
+    if (profile?.status !== 'active') return
+    setAgentLoading(true)
+    api.meGetAgent()
+      .then((data) => setAgentPrompt(data.prompt || ''))
+      .catch((err) => setAgentError(err.message || 'Unable to load agent'))
+      .finally(() => setAgentLoading(false))
+  }, [profile?.status])
+
+  async function handleSaveAgent(e) {
+    e.preventDefault()
+    setAgentError('')
+    setAgentSaving(true)
+    setAgentSaved(false)
+    try {
+      await api.meSaveAgent({ prompt: agentPrompt })
+      setAgentSaved(true)
+      setTimeout(() => setAgentSaved(false), 2500)
+    } catch (err) {
+      setAgentError(err.message || 'Unable to save agent prompt')
+    } finally {
+      setAgentSaving(false)
+    }
+  }
+
   async function handleSave(e) {
     e.preventDefault()
     setError('')
+
+    const inactivityTimeout = Number(form.inactivity_timeout_seconds)
+    const maxDurationSeconds = Number(form.max_call_duration_seconds)
+    if (!Number.isFinite(inactivityTimeout) || inactivityTimeout < 15 || inactivityTimeout > 60) {
+      setError('End call after silence must be between 15 and 60 seconds.')
+      return
+    }
+    if (!Number.isFinite(maxDurationSeconds) || maxDurationSeconds < 120 || maxDurationSeconds > 600) {
+      setError('Maximum call length must be between 2 and 10 minutes.')
+      return
+    }
+
     setSaving(true)
     setSaved(false)
     try {
-      await api.meSaveSettings(form)
+      await api.meSaveSettings({
+        ...form,
+        inactivity_timeout_seconds: inactivityTimeout,
+        max_call_duration_seconds: maxDurationSeconds,
+      })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (err) {
@@ -52,7 +115,7 @@ export default function ClientSettings() {
   async function connectGmail() {
     setError('')
     setGmailLoading(true)
-    const popup = window.open('', '_blank', 'noopener,noreferrer')
+    const popup = window.open('', '_blank')
     try {
       const data = await api.getGmailConnectUrl()
       if (popup) {
@@ -76,8 +139,30 @@ export default function ClientSettings() {
     )
   }
 
+  const gmailDisconnected = profile && !profile.gmail_connected
+
   return (
     <Layout>
+      {gmailDisconnected ? (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-5 py-4 text-sm text-rose-800 shadow-sm">
+          <div>
+            <div className="font-semibold">Gmail not connected.</div>
+            <div className="mt-1 text-xs leading-5 text-rose-700">
+              Emails send from VoiceConnect's shared mailbox and may land in spam.
+              Connect Gmail now.
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={gmailLoading || profile?.status !== 'active'}
+            onClick={connectGmail}
+            className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {gmailLoading ? 'Opening...' : 'Connect Gmail'}
+          </button>
+        </div>
+      ) : null}
+
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">
@@ -137,6 +222,172 @@ export default function ClientSettings() {
                 ? 'Reconnect Gmail'
                 : 'Connect Gmail'}
           </button>
+        </div>
+      </div>
+
+      {profile?.status === 'active' ? (
+        <div className="mb-6 rounded-[28px] bg-white shadow-sm ring-1 ring-slate-200">
+          <form onSubmit={handleSaveAgent} className="space-y-4 p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Agent personality</div>
+                <p className="mt-1 text-xs text-slate-500">
+                  This is the full prompt your AI agent follows on every call. Describe your business, tone, and what callers are likely to ask.
+                </p>
+              </div>
+              {agentSaved ? (
+                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  Saved
+                </span>
+              ) : null}
+            </div>
+            {agentError ? (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                {agentError}
+              </div>
+            ) : null}
+            <textarea
+              rows={12}
+              value={agentPrompt}
+              onChange={(e) => setAgentPrompt(e.target.value)}
+              disabled={agentLoading}
+              className="w-full resize-y rounded-2xl border border-slate-300 px-4 py-3 font-mono text-xs leading-6 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200 disabled:bg-slate-50"
+              placeholder={agentLoading ? 'Loading agent prompt...' : 'You are a friendly phone agent for ...'}
+            />
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={agentLoading || agentSaving || !agentPrompt.trim()}
+                className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {agentSaving ? 'Saving...' : 'Save prompt'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      <div className="mb-6 rounded-[28px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+        <div className="text-sm font-semibold text-slate-900">Call handling</div>
+        <p className="mt-1 text-xs text-slate-500">
+          Choose how follow-ups go out and where live calls forward when the caller wants a human.
+        </p>
+
+        <div className="mt-5 space-y-4">
+          <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Email follow-ups</div>
+              <div className="text-xs text-slate-500">
+                Agent offers to email a summary after the caller confirms.
+              </div>
+            </div>
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                type="checkbox"
+                className="peer sr-only"
+                checked={form.channels.email}
+                onChange={(e) =>
+                  setForm((current) => ({
+                    ...current,
+                    channels: { ...current.channels, email: e.target.checked },
+                  }))
+                }
+              />
+              <span className="h-6 w-11 rounded-full bg-slate-300 transition peer-checked:bg-amber-500" />
+              <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+            </label>
+          </div>
+
+          <div
+            className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 opacity-75"
+            title={sms10dlcApproved ? '' : 'Requires 10DLC. Contact support.'}
+          >
+            <div>
+              <div className="text-sm font-semibold text-slate-900">SMS follow-ups</div>
+              <div className="text-xs text-slate-500">
+                {sms10dlcApproved
+                  ? 'Enabled. SMS will send from your assigned Twilio number.'
+                  : 'Requires 10DLC. Contact support.'}
+              </div>
+            </div>
+            <label
+              className={`relative inline-flex items-center ${sms10dlcApproved ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+            >
+              <input
+                type="checkbox"
+                className="peer sr-only"
+                disabled={!sms10dlcApproved}
+                checked={form.channels.sms && sms10dlcApproved}
+                onChange={(e) =>
+                  setForm((current) => ({
+                    ...current,
+                    channels: { ...current.channels, sms: e.target.checked },
+                  }))
+                }
+              />
+              <span className="h-6 w-11 rounded-full bg-slate-300 transition peer-checked:bg-amber-500 peer-disabled:opacity-60" />
+              <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Forward calls to
+            </label>
+            <input
+              type="tel"
+              placeholder="+13125551234"
+              value={form.forward_to_number}
+              onChange={(e) =>
+                setForm((current) => ({ ...current, forward_to_number: e.target.value }))
+              }
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              E.164 format. If empty, the agent takes a message instead of transferring.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              End call after X seconds of silence
+            </label>
+            <input
+              type="number"
+              min={15}
+              max={60}
+              value={form.inactivity_timeout_seconds}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  inactivity_timeout_seconds: e.target.value,
+                }))
+              }
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            />
+            <p className="mt-1 text-xs text-slate-500">Allowed range: 15-60 seconds.</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Maximum call length (minutes)
+            </label>
+            <input
+              type="number"
+              min={2}
+              max={10}
+              value={Math.round(Number(form.max_call_duration_seconds || 0) / 60)}
+              onChange={(e) => {
+                const minutes = Number(e.target.value)
+                setForm((current) => ({
+                  ...current,
+                  max_call_duration_seconds: Number.isFinite(minutes) ? minutes * 60 : '',
+                }))
+              }}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            />
+            <p className="mt-1 text-xs text-slate-500">Allowed range: 2-10 minutes.</p>
+          </div>
         </div>
       </div>
 

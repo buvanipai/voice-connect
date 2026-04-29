@@ -42,10 +42,8 @@ class InitiateCustomParameters(ElevenLabsBaseModel):
     caller_number: Optional[str] = None
     caller_id: Optional[str] = None
     client_id: Optional[str] = None
-    caller_country: Optional[str] = None
-    caller_state: Optional[str] = None
-    caller_city: Optional[str] = None
     call_sid: Optional[str] = None
+    called_number: Optional[str] = None
 
 
 class InitiateConversationData(ElevenLabsBaseModel):
@@ -79,3 +77,16 @@ class ElevenLabsInitiateResponse(ElevenLabsBaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok"]
     firestore: Literal["connected", "unavailable"]
+
+
+class SendFollowupRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    caller_number: Optional[str] = None
+    caller_email: str
+    email_subject: Optional[str] = None
+    email_body: str
+    intent: Optional[str] = None
+    client_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    call_sid: Optional[str] = None

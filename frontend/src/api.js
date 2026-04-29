@@ -50,8 +50,11 @@ export const api = {
   // Admin — clients
   listClients: () => request('GET', '/api/clients'),
   addClient: (data) => request('POST', '/api/clients', data),
+  getClient: (id) => request('GET', `/api/clients/${id}`),
+  updateClient: (id, data) => request('PATCH', `/api/clients/${id}`, data),
   provisionClient: (id) => request('POST', `/api/clients/${id}/provision`),
   deleteClient: (id) => request('DELETE', `/api/clients/${id}`),
+  getClientCalls: (id) => request('GET', `/api/clients/${id}/calls`),
 
   // Admin — callers
   listCallers: (clientId, intent) => {
@@ -85,8 +88,11 @@ export const api = {
   },
   meGetCaller: (phone) =>
     request('GET', `/me/callers/${encodeURIComponent(phone)}`),
+  meListCalls: (limit = 50) => request('GET', `/me/calls?limit=${limit}`),
   meGetSettings: () => request('GET', '/me/settings'),
   meSaveSettings: (data) => request('POST', '/me/settings', data),
+  meGetAgent: () => request('GET', '/me/agent'),
+  meSaveAgent: (data) => request('POST', '/me/agent', data),
 
   // Gmail OAuth
   getGmailConnectUrl: () => request('GET', '/auth/gmail/connect-url'),

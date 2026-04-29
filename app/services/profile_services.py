@@ -21,18 +21,17 @@ def get_firestore_client():
     return _firestore_client
 
 class ProfileService:
-    def __init__(self, client_id: str = "default"):
+    def __init__(self, client_id: str):
+        if not client_id or client_id == "default":
+            raise ValueError("ProfileService requires a real client_id (no 'default' fallback).")
         self.db = get_firestore_client()
         if self.db:
             # Namespace per client: clients/{client_id}/caller_profiles
-            if client_id and client_id != "default":
-                self.collection = (
-                    self.db.collection("clients")
-                    .document(client_id)
-                    .collection(settings.FIRESTORE_PROFILE_COLLECTION)
-                )
-            else:
-                self.collection = self.db.collection(settings.FIRESTORE_PROFILE_COLLECTION)
+            self.collection = (
+                self.db.collection("clients")
+                .document(client_id)
+                .collection(settings.FIRESTORE_PROFILE_COLLECTION)
+            )
         else:
             self.collection = None
 

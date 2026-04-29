@@ -20,8 +20,10 @@ function statusTone(status) {
 export default function ClientCallers() {
   const [profile, setProfile] = useState(null)
   const [callers, setCallers] = useState([])
+  const [callLogs, setCallLogs] = useState([])
   const [intent, setIntent] = useState('')
   const [loading, setLoading] = useState(true)
+  const [callsLoading, setCallsLoading] = useState(false)
   const [intentLabels, setIntentLabels] = useState({})
   const [selectedPhone, setSelectedPhone] = useState(null)
   const [detail, setDetail] = useState(null)
@@ -44,6 +46,16 @@ export default function ClientCallers() {
     }
   }
 
+  async function loadCalls() {
+    setCallsLoading(true)
+    try {
+      const data = await api.meListCalls(50)
+      setCallLogs(data || [])
+    } finally {
+      setCallsLoading(false)
+    }
+  }
+
   useEffect(() => {
     Promise.all([loadProfile(), api.meGetSettings()])
       .then(([data, settingsData]) => {
@@ -51,6 +63,8 @@ export default function ClientCallers() {
         if (data.status !== 'active') {
           setCallers([])
           setLoading(false)
+        } else {
+          loadCalls()
         }
       })
       .catch(() => setLoading(false))
@@ -76,6 +90,24 @@ export default function ClientCallers() {
   function closeDetail() {
     setSelectedPhone(null)
     setDetail(null)
+  }
+
+  function endReasonBadge(reason) {
+    if (reason === 'inactivity_timeout') {
+      return (
+        <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+          Timed out
+        </span>
+      )
+    }
+    if (reason === 'max_duration_exceeded') {
+      return (
+        <span className="inline-block rounded-full bg-rose-100 px-2 py-0.5 text-xs text-rose-700">
+          Max duration
+        </span>
+      )
+    }
+    return <span className="text-xs text-slate-400">Normal</span>
   }
 
   return (
@@ -121,15 +153,14 @@ export default function ClientCallers() {
         <>
           <div className="mb-5 grid gap-4 md:grid-cols-3">
             <div className="rounded-3xl bg-slate-950 p-5 text-white shadow-lg">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Total callers</div>
-              <div className="mt-3 text-3xl font-bold">{profile.usage?.caller_count || 0}</div>
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-400">This month</div>
+              <div className="mt-3 text-3xl font-bold">{profile.usage?.monthly_minutes || 0} min</div>
             </div>
             <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Last activity</div>
-              <div className="mt-3 text-sm font-semibold text-slate-900">
-                {profile.usage?.last_call_at
-                  ? new Date(profile.usage.last_call_at).toLocaleString()
-                  : 'No calls yet'}
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Plan</div>
+              <div className="mt-3 text-sm font-semibold text-slate-900">{profile.plan?.label || 'Starter'}</div>
+              <div className="mt-1 text-xs text-slate-500">
+                {profile.usage?.monthly_minutes || 0} / {profile.usage?.included_minutes || 0} included min
               </div>
             </div>
             <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
@@ -137,6 +168,20 @@ export default function ClientCallers() {
               <div className="mt-3 text-sm font-semibold text-slate-900">
                 {profile.gmail_connected ? profile.gmail_email || 'Connected' : 'Not connected'}
               </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {profile.usage?.last_call_at
+                  ? `Last activity ${new Date(profile.usage.last_call_at).toLocaleString()}`
+                  : 'No calls yet'}
+              </div>
+              {profile.email_send_method && (
+                <div className="mt-2 text-xs">
+                  <span className="inline-block rounded px-2 py-0.5 bg-slate-100 text-slate-600">
+                    {profile.email_send_method === 'oauth' && '📧 OAuth'}
+                    {profile.email_send_method === 'fallback' && '⚙️ Fallback'}
+                    {profile.email_send_method === 'none' && '❌ Not configured'}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -205,6 +250,50 @@ export default function ClientCallers() {
               </table>
             </div>
           )}
+
+          <div className="mt-6">
+            <h2 className="text-xl font-bold text-slate-950">Call logs</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Recent calls with timeout labels.
+            </p>
+
+            {callsLoading ? (
+              <p className="mt-3 text-sm text-slate-500">Loading calls...</p>
+            ) : callLogs.length === 0 ? (
+              <div className="mt-3 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center text-sm text-slate-500">
+                No calls yet.
+              </div>
+            ) : (
+              <div className="mt-3 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+                <table className="w-full text-sm">
+                  <thead className="border-b border-slate-200 bg-slate-50 text-left">
+                    <tr>
+                      <th className="px-4 py-3 font-medium text-slate-700">Caller</th>
+                      <th className="px-4 py-3 font-medium text-slate-700">Intent</th>
+                      <th className="px-4 py-3 font-medium text-slate-700">Status</th>
+                      <th className="px-4 py-3 font-medium text-slate-700">Duration</th>
+                      <th className="px-4 py-3 font-medium text-slate-700">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {callLogs.slice(0, 20).map((call) => (
+                      <tr key={call.id}>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-700">{call.caller_phone || '—'}</td>
+                        <td className="px-4 py-3 text-slate-900">
+                          {call.intent ? resolveLabel(call.intent, intentLabels) : '—'}
+                        </td>
+                        <td className="px-4 py-3">{endReasonBadge(call.ended_reason)}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{call.duration_minutes || 0} min</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">
+                          {call.occurred_at ? new Date(call.occurred_at).toLocaleString() : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </>
       ) : (
         <div className="rounded-[28px] border border-dashed border-slate-300 bg-white px-6 py-10">
