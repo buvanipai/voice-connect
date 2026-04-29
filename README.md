@@ -1,12 +1,12 @@
 # VoiceConnect
 
-A multi-tenant SaaS platform that gives any business an AI phone number. When someone calls, an agentic AI answers, holds a real conversation, collects caller details, and sends a follow-up SMS or email — all automatically.
+A multi-tenant platform that gives any business an AI phone number. When someone calls, an AI agent answers, holds a real conversation, collects caller details, and sends a follow-up email.
 
 ## What it does
 
-A business signs up and gets their own dedicated phone number. When a caller dials that number, an agentic voice AI answers, has a natural back-and-forth conversation, identifies what the caller wants (job inquiry, sales lead, general question), and collects the relevant details. After the call ends, the system saves a caller profile and sends a follow-up via WhatsApp/SMS or email.
+A business signs up and gets their own dedicated phone number. When a caller dials that number, the AI answers, identifies what the caller wants, collects the relevant details, and saves the interaction for the client team. If the caller confirms they want a follow-up, the system sends an email summary.
 
-Admins manage all of this from a single dashboard. Clients log in to see their own callers and customise their follow-up messages.
+Admins manage clients, provisioning, usage, and billing manually from a single dashboard. Clients log in to see their own callers, call logs, and agent settings.
 
 ## Tech stack
 
@@ -14,7 +14,7 @@ Admins manage all of this from a single dashboard. Clients log in to see their o
 |---|---|
 | Backend API | FastAPI (Python), deployed on Google Cloud Run |
 | Database | Google Cloud Firestore |
-| Phone | Twilio (inbound call routing via TwiML, WhatsApp/SMS follow-ups) |
+| Phone | Twilio (inbound telephony + number provisioning) |
 | Voice AI | Agentic conversational AI (per-client agents with client-specific knowledge bases) |
 | Frontend | React 18 + Vite + Tailwind CSS, deployed on Google Cloud Run |
 | Auth | JWT (HS256) + bcrypt, Google OAuth for per-client Gmail integration |
@@ -28,9 +28,9 @@ Caller → Twilio number
         Agentic AI ←→ Client knowledge base (scraped from their website)
            ↓ POST /elevenlabs/initiate  (pre-call: inject caller profile)
            ↓ POST /elevenlabs/post-call (after call: save profile + trigger follow-up)
-        Firestore (caller profiles, client records, failed notifications)
-           ↓
-        Twilio WhatsApp or Gmail → Caller
+          Firestore (caller profiles, call logs, client records)
+            ↓
+          Gmail → Caller
 ```
 
 **Multi-tenancy:** Each client gets their own Firestore sub-collection (`clients/{client_id}/caller_profiles`), their own AI agent, and their own knowledge base.
@@ -55,14 +55,14 @@ Caller → Twilio number
 | `DELETE` | `/api/clients/{id}` | Admin: delete client + release resources |
 | `GET` | `/api/callers` | Admin: list callers across all clients |
 | `GET` | `/api/callers/{phone}` | Admin: get caller detail |
-| `GET` | `/api/settings` | Admin: read platform-wide SMS templates |
-| `POST` | `/api/settings` | Admin: update platform-wide SMS templates |
+| `GET` | `/api/settings` | Admin: read platform-wide caller labels |
+| `POST` | `/api/settings` | Admin: update platform-wide caller labels |
 | `GET` | `/api/failed-notifications` | Admin: list failed follow-up attempts |
 | `GET` | `/me/profile` | Client: their own profile |
 | `GET` | `/me/callers` | Client: their own callers |
 | `GET` | `/me/callers/{phone}` | Client: caller detail |
-| `GET` | `/me/settings` | Client: their follow-up SMS copy |
-| `POST` | `/me/settings` | Client: save their follow-up SMS copy |
+| `GET` | `/me/settings` | Client: their call handling and caller labels |
+| `POST` | `/me/settings` | Client: save call handling settings |
 
 ## Local setup
 
@@ -95,7 +95,6 @@ ELEVENLABS_AGENT_ID=          # template agent to clone for new clients
 # Twilio
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
-TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 
 # Follow-up
 FOLLOW_UP_URL=                 # link sent to callers (e.g. resume upload page)
@@ -216,6 +215,10 @@ Profiles in Firestore are namespaced per client and keyed by E.164 phone number:
 ```
 
 Each intent is stored separately so a returning caller who called about a job once and a general inquiry another time has both records preserved.
+
+## Billing
+
+Usage is tracked per client in the admin dashboard. Billing is handled manually by admin; there is no in-app paywall or self-serve checkout flow.
 
 ## Follow-up logic
 

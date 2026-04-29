@@ -1,6 +1,6 @@
 # VoiceConnect — Admin User Manual
 
-This is the guide for the **admin**. It covers everything you need to run the platform day-to-day: onboarding clients, watching call activity, handling failures, and configuring messaging.
+This is the guide for the **admin**. It covers everything you need to run the platform day-to-day: onboarding clients, watching call activity, handling failures, and managing usage manually.
 
 ---
 
@@ -16,7 +16,7 @@ This is the guide for the **admin**. It covers everything you need to run the pl
 
 ## What VoiceConnect does
 
-A business signs up and gets an AI phone number. When someone calls that number, an AI agent answers, has a real conversation, and collects their details. After the call, the caller gets a follow-up SMS or email. The admin oversees all of this from a single dashboard.
+A business signs up and gets an AI phone number. When someone calls that number, an AI agent answers, has a real conversation, and collects their details. If the caller confirms they want a follow-up, the system sends an email summary. The admin oversees all of this from a single dashboard.
 
 ---
 
@@ -80,25 +80,20 @@ Click any row to open the caller detail panel on the right. It shows:
 
 ## Settings page
 
-Platform-wide default SMS messages. These apply to all clients who haven't written their own custom message.
-
-- **Job seeker follow-up** — the SMS sent after a job seeker call
-- **Sales lead follow-up** — the SMS sent after a sales inquiry call
-
-Write these in plain text. Clients can override them from their own Settings page.
+Platform-wide caller labels. These control how intents appear across the admin and client dashboards.
 
 ---
 
 ## Failed Notifications page
 
-Every time a follow-up SMS or email couldn't be delivered, it appears here. Columns:
+Every time a follow-up email couldn't be delivered, it appears here. Columns:
 
 - **Timestamp** — when the failure happened
 - **Caller** — the phone number that was supposed to receive the message
-- **Channel** — SMS or email
-- **Reason** — the exact error (e.g. "no email address was available", "Twilio error 21211")
+- **Channel** — email
+- **Reason** — the exact delivery error returned by the system
 
-Use this page to spot patterns — if a lot of email failures are happening, clients may not have connected their Gmail. If SMS is failing, check Twilio account status.
+Use this page to spot patterns — if a lot of email failures are happening, clients may not have connected their Gmail.
 
 ---
 
@@ -108,7 +103,7 @@ Once provisioned, a client logs in at https://voiceconnect-frontend-ulzhzqohga-u
 
 - Their assigned phone number front and centre
 - A table of every caller with names, intents, and last call time
-- A Settings page where they can write their own follow-up SMS copy and connect their Gmail so emails come from their own inbox
+- A Settings page where they can connect Gmail, adjust call handling, and rename caller categories
 
 Clients can log in any time to review caller activity. They cannot see other clients' data.
 
@@ -120,7 +115,7 @@ Clients can log in any time to review caller activity. They cannot see other cli
 2. The AI agent answers and has a natural conversation, pulling answers from the client's website
 3. The AI collects whatever's relevant (name, email, job type, etc.) depending on why the caller is calling
 4. After the call ends, the system saves the caller's profile
-5. If the caller asked for a follow-up (by SMS or email), it gets sent immediately
+5. If the caller asked for a follow-up email, it gets sent immediately
 6. The caller appears in the client's Callers table within seconds
 
 ---
@@ -134,10 +129,10 @@ Check their status on the Clients page. If it says anything other than Active, p
 The post-call webhook from ElevenLabs may have failed. Check Cloud Run logs. The caller profile only saves after the call ends and the webhook fires.
 
 **"Follow-ups aren't being sent"**
-Check the Failed Notifications page. The most common reasons: caller didn't provide an email, client hasn't connected Gmail, or Twilio SMS credit is low.
+Check the Failed Notifications page. The most common reasons: caller didn't provide an email or the client hasn't connected Gmail.
 
-**"A client wants to change their follow-up message"**
-They can do it themselves from their Settings page. No action needed from you.
+**"How do we bill clients?"**
+Usage is tracked in the dashboard, but billing is handled manually by admin. There is no in-app paywall.
 
 **"A client wants a number in a specific area code"**
 They set this at signup. If they already signed up without one, delete and re-create the account, or manually update the area_code field in Firestore before provisioning.

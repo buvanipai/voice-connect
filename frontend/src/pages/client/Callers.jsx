@@ -4,6 +4,7 @@ import CallerSlideOver from '../../components/CallerSlideOver'
 import { api } from '../../api'
 
 const INTENT_KEYS = ['JOB_SEEKER', 'US_STAFFING', 'SALES', 'GENERAL_INQUIRY']
+const CALL_LOGS_PAGE_SIZE = 10
 
 function resolveLabel(key, labels) {
   if (labels && labels[key]) return labels[key]
@@ -21,6 +22,7 @@ export default function ClientCallers() {
   const [profile, setProfile] = useState(null)
   const [callers, setCallers] = useState([])
   const [callLogs, setCallLogs] = useState([])
+  const [callLogsPage, setCallLogsPage] = useState(1)
   const [intent, setIntent] = useState('')
   const [loading, setLoading] = useState(true)
   const [callsLoading, setCallsLoading] = useState(false)
@@ -49,8 +51,12 @@ export default function ClientCallers() {
   async function loadCalls() {
     setCallsLoading(true)
     try {
-      const data = await api.meListCalls(50)
-      setCallLogs(data || [])
+      const data = await api.meListCalls(200)
+      const sorted = [...(data || [])].sort(
+        (a, b) => new Date(b?.occurred_at || 0).getTime() - new Date(a?.occurred_at || 0).getTime()
+      )
+      setCallLogs(sorted)
+      setCallLogsPage(1)
     } finally {
       setCallsLoading(false)
     }
@@ -109,6 +115,13 @@ export default function ClientCallers() {
     }
     return <span className="text-xs text-slate-400">Normal</span>
   }
+
+  const totalCallLogPages = Math.max(1, Math.ceil(callLogs.length / CALL_LOGS_PAGE_SIZE))
+  const safeCallLogsPage = Math.min(callLogsPage, totalCallLogPages)
+  const callLogStart = (safeCallLogsPage - 1) * CALL_LOGS_PAGE_SIZE
+  const visibleCallLogs = callLogs.slice(callLogStart, callLogStart + CALL_LOGS_PAGE_SIZE)
+  const failedFollowups = callLogs.filter((call) => call.followup_status === 'send_failed')
+  const sentFollowups = callLogs.filter((call) => call.followup_status === 'sent')
 
   return (
     <Layout>
@@ -254,7 +267,7 @@ export default function ClientCallers() {
           <div className="mt-6">
             <h2 className="text-xl font-bold text-slate-950">Call logs</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Recent calls with timeout labels.
+              Recent calls sorted newest to oldest, with timeout labels.
             </p>
 
             {callsLoading ? (
@@ -276,7 +289,7 @@ export default function ClientCallers() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {callLogs.slice(0, 20).map((call) => (
+                    {visibleCallLogs.map((call) => (
                       <tr key={call.id}>
                         <td className="px-4 py-3 font-mono text-xs text-slate-700">{call.caller_phone || '—'}</td>
                         <td className="px-4 py-3 text-slate-900">
@@ -287,6 +300,88 @@ export default function ClientCallers() {
                         <td className="px-4 py-3 text-xs text-slate-500">
                           {call.occurred_at ? new Date(call.occurred_at).toLocaleString() : '—'}
                         </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {callLogs.length > CALL_LOGS_PAGE_SIZE && (
+              <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                <span>
+                  Showing {callLogStart + 1}-{Math.min(callLogStart + CALL_LOGS_PAGE_SIZE, callLogs.length)} of {callLogs.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={safeCallLogsPage <= 1}
+                    onClick={() => setCallLogsPage((p) => Math.max(1, p - 1))}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <span>
+                    Page {safeCallLogsPage} / {totalCallLogPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safeCallLogsPage >= totalCallLogPages}
+                    onClick={() => setCallLogsPage((p) => Math.min(totalCallLogPages, p + 1))}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-8">
+            <h2 className="text-xl font-bold text-slate-950">Follow-up delivery</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Email sending results for post-call follow-ups.
+            </p>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Attempts</div>
+                <div className="mt-2 text-2xl font-bold text-slate-900">{sentFollowups.length + failedFollowups.length}</div>
+              </div>
+              <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Sent</div>
+                <div className="mt-2 text-2xl font-bold text-emerald-700">{sentFollowups.length}</div>
+              </div>
+              <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Failed</div>
+                <div className="mt-2 text-2xl font-bold text-rose-700">{failedFollowups.length}</div>
+              </div>
+            </div>
+
+            {failedFollowups.length === 0 ? (
+              <div className="mt-3 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center text-sm text-slate-500">
+                No failed follow-up emails.
+              </div>
+            ) : (
+              <div className="mt-3 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+                <table className="w-full text-sm">
+                  <thead className="border-b border-slate-200 bg-slate-50 text-left">
+                    <tr>
+                      <th className="px-4 py-3 font-medium text-slate-700">Caller</th>
+                      <th className="px-4 py-3 font-medium text-slate-700">Email</th>
+                      <th className="px-4 py-3 font-medium text-slate-700">Date</th>
+                      <th className="px-4 py-3 font-medium text-slate-700">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {failedFollowups.slice(0, 25).map((call) => (
+                      <tr key={`failed-${call.id}`}>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-700">{call.caller_phone || '—'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-700">{call.caller_email || '—'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">
+                          {call.followup_timestamp ? new Date(call.followup_timestamp).toLocaleString() : (call.occurred_at ? new Date(call.occurred_at).toLocaleString() : '—')}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-rose-700">{call.followup_error || 'Send failed'}</td>
                       </tr>
                     ))}
                   </tbody>

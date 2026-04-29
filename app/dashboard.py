@@ -130,6 +130,24 @@ def _upsert_timeout_protocol(
     return (existing + block).strip()
 
 
+def _normalize_prompt_tool_fields(prompt_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure ElevenLabs receives only one tool reference mode.
+
+    ElevenLabs rejects payloads that include both explicit tool definitions
+    ("tools") and referenced tool IDs ("tool_ids") in the same prompt config.
+    """
+    if not isinstance(prompt_cfg, dict):
+        return {}
+
+    has_tools = isinstance(prompt_cfg.get("tools"), list) and len(prompt_cfg.get("tools") or []) > 0
+    has_tool_ids = isinstance(prompt_cfg.get("tool_ids"), list) and len(prompt_cfg.get("tool_ids") or []) > 0
+
+    if has_tools and has_tool_ids:
+        prompt_cfg.pop("tool_ids", None)
+
+    return prompt_cfg
+
+
 def _get_name(profile: Dict[str, Any]) -> str:
     intents = profile.get("intents") or {}
     last_intent = profile.get("last_intent")
@@ -196,6 +214,11 @@ def _fetch_client_calls(client_id: str, db: Any, limit: int = 50) -> List[Dict[s
                 "occurred_at": data.get("occurred_at"),
                 "ended_reason": data.get("ended_reason"),
                 "transcript_summary": data.get("transcript_summary"),
+                "followup_sent": bool(data.get("followup_sent", False)),
+                "followup_status": data.get("followup_status"),
+                "caller_email": data.get("caller_email"),
+                "followup_error": data.get("error"),
+                "followup_timestamp": data.get("timestamp"),
             })
         return calls
     except Exception as e:
@@ -724,6 +747,7 @@ async def _create_elevenlabs_agent(name: str, template: Dict[str, Any], kb_id: s
     )
 
     _inject_send_followup_tool(prompt_cfg)
+    prompt_cfg = _normalize_prompt_tool_fields(prompt_cfg)
 
     agent_cfg["prompt"] = prompt_cfg
     conversation_config["agent"] = agent_cfg
@@ -822,6 +846,7 @@ async def _update_elevenlabs_agent_prompt(agent_id: str, prompt_text: str) -> No
     agent_cfg = conversation_config.get("agent", {}) or {}
     prompt_cfg = agent_cfg.get("prompt", {}) or {}
     prompt_cfg["prompt"] = prompt_text
+    prompt_cfg = _normalize_prompt_tool_fields(prompt_cfg)
     agent_cfg["prompt"] = prompt_cfg
     conversation_config["agent"] = agent_cfg
 
@@ -859,6 +884,7 @@ async def _patch_agent_transfer_tool(agent_id: str, forward_to_number: Optional[
             },
         })
     prompt_cfg["tools"] = tools
+    prompt_cfg = _normalize_prompt_tool_fields(prompt_cfg)
     agent_cfg["prompt"] = prompt_cfg
     conversation_config["agent"] = agent_cfg
 
@@ -894,6 +920,7 @@ async def _patch_agent_timeout_protocol(
         normalized_inactivity_seconds,
         normalized_max_duration_seconds,
     )
+    prompt_cfg = _normalize_prompt_tool_fields(prompt_cfg)
 
     turn_cfg["silence_end_call_timeout"] = normalized_inactivity_seconds
     soft_timeout_cfg = turn_cfg.get("soft_timeout_config", {}) or {}

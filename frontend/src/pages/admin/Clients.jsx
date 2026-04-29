@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import Layout from '../../components/Layout'
 import { api } from '../../api'
 
+const CLIENT_CALLS_PAGE_SIZE = 10
+
 function formatStatus(status) {
   return (status || 'pending').replaceAll('_', ' ')
 }
@@ -37,6 +39,7 @@ export default function AdminClients() {
   const [editing, setEditing] = useState(null)
   const [calls, setCalls] = useState([])
   const [callsLoading, setCallsLoading] = useState(false)
+  const [callsPage, setCallsPage] = useState(1)
   const [addForm, setAddForm] = useState({
     name: '',
     website_url: '',
@@ -63,6 +66,7 @@ export default function AdminClients() {
   function openEdit(client) {
     setEditing(client)
     setCalls([])
+    setCallsPage(1)
     setCallsLoading(true)
     setEditForm({
       name: client.name || '',
@@ -78,7 +82,10 @@ export default function AdminClients() {
     // Fetch call history
     api.getClientCalls(client.id)
       .then((data) => {
-        setCalls(data || [])
+        const sorted = [...(data || [])].sort(
+          (a, b) => new Date(b?.occurred_at || 0).getTime() - new Date(a?.occurred_at || 0).getTime()
+        )
+        setCalls(sorted)
       })
       .catch((err) => {
         console.error('Failed to fetch calls:', err)
@@ -146,6 +153,11 @@ export default function AdminClients() {
     }).length
     return { pending, active, monthlyMinutes, nearLimit, overLimit }
   }, [clients])
+
+  const totalCallsPages = Math.max(1, Math.ceil(calls.length / CLIENT_CALLS_PAGE_SIZE))
+  const safeCallsPage = Math.min(callsPage, totalCallsPages)
+  const callsStart = (safeCallsPage - 1) * CLIENT_CALLS_PAGE_SIZE
+  const visibleCalls = calls.slice(callsStart, callsStart + CLIENT_CALLS_PAGE_SIZE)
 
   async function handleProvision(id) {
     setActionState((current) => ({ ...current, [id]: 'provisioning' }))
@@ -560,13 +572,13 @@ export default function AdminClients() {
 
       {editing ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 overflow-y-auto"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 px-4 py-6"
           onClick={closeEdit}
         >
           <form
             onClick={(e) => e.stopPropagation()}
             onSubmit={saveEdit}
-            className="w-full max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl my-8"
+            className="my-2 max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl"
           >
             <div className="flex items-start justify-between">
               <div>
@@ -699,7 +711,7 @@ export default function AdminClients() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {calls.slice(0, 10).map((call) => (
+                      {visibleCalls.map((call) => (
                         <tr key={call.id} className="hover:bg-slate-50">
                           <td className="px-3 py-2 font-mono text-slate-600">{call.caller_phone}</td>
                           <td className="px-3 py-2 text-slate-600">{call.intent || '—'}</td>
@@ -715,6 +727,35 @@ export default function AdminClients() {
                   </table>
                 </div>
               )}
+
+              {!callsLoading && calls.length > CLIENT_CALLS_PAGE_SIZE ? (
+                <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                  <span>
+                    Showing {callsStart + 1}-{Math.min(callsStart + CLIENT_CALLS_PAGE_SIZE, calls.length)} of {calls.length}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={safeCallsPage <= 1}
+                      onClick={() => setCallsPage((p) => Math.max(1, p - 1))}
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <span>
+                      Page {safeCallsPage} / {totalCallsPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={safeCallsPage >= totalCallsPages}
+                      onClick={() => setCallsPage((p) => Math.min(totalCallsPages, p + 1))}
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             {editError ? (

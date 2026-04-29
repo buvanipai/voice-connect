@@ -12,15 +12,12 @@ const INTENT_KEYS = [
 export default function ClientSettings() {
   const [profile, setProfile] = useState(null)
   const [form, setForm] = useState({
-    sms_job_seeker: '',
-    sms_sales: '',
     intent_labels: {},
     forward_to_number: '',
     inactivity_timeout_seconds: 28,
     max_call_duration_seconds: 300,
-    channels: { email: true, sms: false },
+    channels: { email: true },
   })
-  const [sms10dlcApproved, setSms10dlcApproved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -37,17 +34,13 @@ export default function ClientSettings() {
       .then(([profileData, settingsData]) => {
         setProfile(profileData)
         localStorage.setItem('vc_status', profileData.status || '')
-        setSms10dlcApproved(Boolean(settingsData.sms_10dlc_approved))
         setForm({
-          sms_job_seeker: settingsData.sms_job_seeker || '',
-          sms_sales: settingsData.sms_sales || '',
           intent_labels: settingsData.intent_labels || {},
           forward_to_number: settingsData.forward_to_number || '',
           inactivity_timeout_seconds: settingsData.inactivity_timeout_seconds || 28,
           max_call_duration_seconds: settingsData.max_call_duration_seconds || 300,
           channels: {
             email: settingsData.channels?.email !== false,
-            sms: Boolean(settingsData.channels?.sms),
           },
         })
       })
@@ -148,8 +141,7 @@ export default function ClientSettings() {
           <div>
             <div className="font-semibold">Gmail not connected.</div>
             <div className="mt-1 text-xs leading-5 text-rose-700">
-              Emails send from VoiceConnect's shared mailbox and may land in spam.
-              Connect Gmail now.
+              Follow-up emails will fall back to the platform mailbox until you connect Gmail.
             </div>
           </div>
           <button
@@ -168,9 +160,9 @@ export default function ClientSettings() {
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">
             Client settings
           </p>
-          <h1 className="mt-2 text-3xl font-bold text-slate-950">Messaging and inbox</h1>
+          <h1 className="mt-2 text-3xl font-bold text-slate-950">Email and inbox</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Customize follow-up copy and connect Gmail so post-call emails come from the client account instead of the platform fallback.
+            Connect Gmail and manage how your AI handles calls, transfers, and follow-up emails.
           </p>
         </div>
         <div className="rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200">
@@ -270,7 +262,7 @@ export default function ClientSettings() {
       <div className="mb-6 rounded-[28px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
         <div className="text-sm font-semibold text-slate-900">Call handling</div>
         <p className="mt-1 text-xs text-slate-500">
-          Choose how follow-ups go out and where live calls forward when the caller wants a human.
+          Control follow-up email delivery and where live calls forward when the caller wants a human.
         </p>
 
         <div className="mt-5 space-y-4">
@@ -294,38 +286,6 @@ export default function ClientSettings() {
                 }
               />
               <span className="h-6 w-11 rounded-full bg-slate-300 transition peer-checked:bg-amber-500" />
-              <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
-            </label>
-          </div>
-
-          <div
-            className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 opacity-75"
-            title={sms10dlcApproved ? '' : 'Requires 10DLC. Contact support.'}
-          >
-            <div>
-              <div className="text-sm font-semibold text-slate-900">SMS follow-ups</div>
-              <div className="text-xs text-slate-500">
-                {sms10dlcApproved
-                  ? 'Enabled. SMS will send from your assigned Twilio number.'
-                  : 'Requires 10DLC. Contact support.'}
-              </div>
-            </div>
-            <label
-              className={`relative inline-flex items-center ${sms10dlcApproved ? 'cursor-pointer' : 'cursor-not-allowed'}`}
-            >
-              <input
-                type="checkbox"
-                className="peer sr-only"
-                disabled={!sms10dlcApproved}
-                checked={form.channels.sms && sms10dlcApproved}
-                onChange={(e) =>
-                  setForm((current) => ({
-                    ...current,
-                    channels: { ...current.channels, sms: e.target.checked },
-                  }))
-                }
-              />
-              <span className="h-6 w-11 rounded-full bg-slate-300 transition peer-checked:bg-amber-500 peer-disabled:opacity-60" />
               <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
             </label>
           </div>
@@ -394,32 +354,6 @@ export default function ClientSettings() {
       <div className="rounded-[28px] bg-white shadow-sm ring-1 ring-slate-200">
         <form onSubmit={handleSave} className="space-y-5 p-6">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Job seeker follow-up
-            </label>
-            <textarea
-              rows={4}
-              value={form.sms_job_seeker}
-              onChange={(e) => setForm((current) => ({ ...current, sms_job_seeker: e.target.value }))}
-              className="w-full resize-none rounded-2xl border border-slate-300 px-4 py-3 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              placeholder="Use {{resume_link}} and {{company_name}} placeholders if you want them inserted automatically."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Sales lead follow-up
-            </label>
-            <textarea
-              rows={4}
-              value={form.sms_sales}
-              onChange={(e) => setForm((current) => ({ ...current, sms_sales: e.target.value }))}
-              className="w-full resize-none rounded-2xl border border-slate-300 px-4 py-3 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              placeholder="Leave blank to inherit the admin default."
-            />
-          </div>
-
-          <div className="border-t border-slate-100 pt-5">
             <div className="mb-3">
               <div className="text-sm font-medium text-slate-700">Caller type labels</div>
               <p className="mt-1 text-xs text-slate-500">

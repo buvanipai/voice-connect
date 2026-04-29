@@ -10,7 +10,7 @@ const INTENT_KEYS = [
 ]
 
 export default function AdminSettings() {
-  const [form, setForm] = useState({ sms_job_seeker: '', sms_sales: '', intent_labels: {} })
+  const [form, setForm] = useState({ intent_labels: {} })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -20,8 +20,6 @@ export default function AdminSettings() {
     api.getSettings()
       .then((data) =>
         setForm({
-          sms_job_seeker: data.sms_job_seeker || '',
-          sms_sales: data.sms_sales || '',
           intent_labels: data.intent_labels || {},
         })
       )
@@ -59,9 +57,9 @@ export default function AdminSettings() {
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">
           Platform defaults
         </p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-950">SMS settings</h1>
+        <h1 className="mt-2 text-3xl font-bold text-slate-950">Caller labels</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Platform-wide follow-up message templates. Clients can override these in their own settings.
+          Platform-wide names for caller categories. These labels appear across the admin and client dashboards.
         </p>
       </div>
 
@@ -74,32 +72,6 @@ export default function AdminSettings() {
       <div className="rounded-[28px] bg-white shadow-sm ring-1 ring-slate-200">
         <form onSubmit={handleSave} className="space-y-5 p-6">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Job seeker follow-up
-            </label>
-            <textarea
-              rows={4}
-              value={form.sms_job_seeker}
-              onChange={(e) => setForm((f) => ({ ...f, sms_job_seeker: e.target.value }))}
-              className="w-full resize-none rounded-2xl border border-slate-300 px-4 py-3 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              placeholder="Message sent to job seekers after their call…"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Sales lead follow-up
-            </label>
-            <textarea
-              rows={4}
-              value={form.sms_sales}
-              onChange={(e) => setForm((f) => ({ ...f, sms_sales: e.target.value }))}
-              className="w-full resize-none rounded-2xl border border-slate-300 px-4 py-3 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              placeholder="Message sent to sales leads after their call…"
-            />
-          </div>
-
-          <div className="border-t border-slate-100 pt-5">
             <div className="mb-3">
               <div className="text-sm font-medium text-slate-700">Caller type labels</div>
               <p className="mt-1 text-xs text-slate-500">
